@@ -55,6 +55,11 @@ const usageChip = (u, warn = false) => `
 const statusTag = p => p.status === 'planned' ? '<span class="tag">naplánováno</span>'
   : p.status === 'failed' ? `<span class="tag failed">nepovedený · ${Math.round(p.percent ?? 0)} %</span>` : '';
 const projectTag = p => p.project_name ? `<span class="tag project-tag">${esc(p.project_name)}</span>` : '';
+// placeholder = prázdné místo stejné velikosti, aby řádky se seznamem náhledů lícovaly
+const thumbImg = (url, cls = '', placeholder = false) => url
+  ? `<img class="thumb${cls ? ' ' + cls : ''}" src="${esc(url)}" alt="" loading="lazy">`
+  : placeholder ? `<span class="thumb empty${cls ? ' ' + cls : ''}" aria-hidden="true"></span>` : '';
+const fmtSize = b => b >= 1e6 ? `${(b / 1e6).toLocaleString('cs-CZ', { maximumFractionDigits: 1 })} MB` : `${Math.max(1, Math.round(b / 1e3))} kB`;
 
 // Bublina je popover, takže je v top layer nad modálními dialogy (z-index na ně nestačí).
 // Při každém zobrazení se znovu otevře, aby skončila nad naposledy otevřeným dialogem.
@@ -167,10 +172,13 @@ function renderPlanned() {
       }).join('');
       return `
         <article class="planned-item" data-print="${p.id}">
-          <div class="planned-info">
-            <div><button type="button" class="planned-name">${esc(p.name)}</button> ${projectTag(p)}</div>
-            <div class="chips">${chips}</div>
-            <div class="planned-meta num">${meta}</div>
+          <div class="planned-main">
+            ${thumbImg(p.thumb_url)}
+            <div class="planned-info">
+              <div><button type="button" class="planned-name">${esc(p.name)}</button> ${projectTag(p)}</div>
+              <div class="chips">${chips}</div>
+              <div class="planned-meta num">${meta}</div>
+            </div>
           </div>
           <div class="planned-actions">
             <button type="button" class="btn ok" data-done>Hotovo</button>
@@ -426,9 +434,11 @@ dupDialog.addEventListener('close', async () => {
 const spoolDialog = $('#spool-dialog');
 const spoolForm = $('#spool-form');
 let editingSpool = null;
+let spoolSaved = null; // callback z importu: dostane uloženou cívku
 
-function openSpoolForm(spool = null) {
+function openSpoolForm(spool = null, { prefill = null, onSaved = null } = {}) {
   editingSpool = spool;
+  spoolSaved = onSaved;
   spoolForm.reset();
   $('[data-title]', spoolForm).textContent = spool ? 'Upravit cívku' : 'Nová cívka';
   $$('[data-edit-only]', spoolForm).forEach(el => el.hidden = !spool);
@@ -439,18 +449,23 @@ function openSpoolForm(spool = null) {
     $('[data-action="archive"]', spoolForm).textContent = spool.archived ? 'Obnovit z archivu' : 'Archivovat';
   } else {
     spoolForm.elements.spool_weight.value = state.settings.default_spool_weight ?? '';
+    for (const [key, value] of Object.entries(prefill ?? {})) spoolForm.elements[key].value = value;
   }
   spoolDialog.showModal();
 }
 
 spoolDialog.addEventListener('close', async () => {
-  if (spoolDialog.returnValue !== 'save') return;
+  if (spoolDialog.returnValue !== 'save') { spoolSaved = null; return; }
   const body = Object.fromEntries(new FormData(spoolForm));
   try {
-    if (editingSpool) await api(`/spools/${editingSpool.id}`, { method: 'PUT', body });
-    else await api('/spools', { method: 'POST', body });
+    const saved = editingSpool
+      ? await api(`/spools/${editingSpool.id}`, { method: 'PUT', body })
+      : await api('/spools', { method: 'POST', body });
     toast(editingSpool ? 'Cívka upravena' : 'Cívka přidána');
     await refresh();
+    const done = spoolSaved;
+    spoolSaved = null;
+    done?.(saved);
   } catch (err) { toast(err.message, true); spoolDialog.showModal(); }
 });
 
@@ -677,6 +692,9 @@ async function openProject(id) {
     ['Založen', p.created_at ? fmtDate(p.created_at) : '—'],
   ];
 
+  const anyThumb = prints.some(pr => pr.thumb_url);
+  const files = [...new Map(p.prints.filter(pr => pr.file_id).map(pr => [pr.file_id, pr.file_name])).entries()];
+
   $('#project-body').innerHTML = `
     <div class="detail-head">
       <div>
@@ -690,11 +708,17 @@ async function openProject(id) {
     <h3 class="hint" style="margin:0 0 6px">Tisky</h3>
     <ul class="history project-prints">${prints.length ? prints.map(pr => `
       <li data-print="${pr.id}"${pr.status === 'planned' ? ' class="planned"' : ''}>
-        <div>${esc(pr.name)} ${statusTag(pr)}
-          <div class="when">${pr.status === 'planned' ? 'čeká na tisk' : fmtDate(pr.printed_at)}${pr.duration_min != null ? ` · ${fmtDur(pr.duration_min)}` : ''}</div></div>
-        <div class="right num">${fmtG(printGrams(pr))}<div class="when">${costText(pr.filament_cost, pr.energy_cost)}</div></div>
+        <div class="row-main">${thumbImg(pr.thumb_url, '', anyThumb)}<div>${esc(pr.name)} ${statusTag(pr)}
+          <div class="when">${pr.status === 'planned' ? 'čeká na tisk' : fmtDate(pr.printed_at)}${pr.duration_min != null ? ` · ${fmtDur(pr.duration_min)}` : ''}</div></div></div>
+        <div class="row-end">
+          ${pr.status !== 'planned' ? '<button type="button" class="btn small" data-reprint title="Vytisknout znovu">↻ Znovu</button>' : ''}
+          <div class="right num">${fmtG(printGrams(pr))}<div class="when">${costText(pr.filament_cost, pr.energy_cost)}</div></div>
+        </div>
       </li>`).join('')
       : '<li class="hint">Zatím žádné tisky.</li>'}</ul>
+    ${files.length ? `<h3 class="hint" style="margin:0 0 6px">Soubory</h3>
+    <ul class="file-list">${files.map(([id, name]) => `
+      <li><a href="/api/files/${id}/download" download>${esc(name || `soubor-${id}.3mf`)}</a></li>`).join('')}</ul>` : ''}
     <div class="dialog-actions">
       <button class="btn ghost danger" data-act="delete">Smazat</button>
       <button class="btn" data-act="edit">Upravit</button>
@@ -711,8 +735,10 @@ projectDetail.addEventListener('click', async e => {
   const p = detailProject;
   const row = e.target.closest('[data-print]');
   if (row) {
+    const print = p.prints.find(pr => pr.id === Number(row.dataset.print));
     projectDetail.close();
-    return openPrintForm(p.prints.find(pr => pr.id === Number(row.dataset.print)), { returnTo: p.id });
+    if (e.target.closest('[data-reprint]')) return reprint(print);
+    return openPrintForm(print, { returnTo: p.id });
   }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (!act) return;
@@ -751,8 +777,10 @@ function renderPrints() {
     return;
   }
   if (!list.length) { el.innerHTML = '<div class="empty-state">Nic neodpovídá hledání.</div>'; return; }
+  const anyThumb = list.some(p => p.thumb_url);
   el.innerHTML = list.map(p => `
-      <button class="print" data-print="${p.id}">
+      <button class="print${anyThumb ? ' has-thumb' : ''}" data-print="${p.id}">
+        ${thumbImg(p.thumb_url, '', anyThumb)}
         <div><span class="name">${esc(p.name)}</span> ${statusTag(p)} ${projectTag(p)}
           <span class="date">· ${fmtDate(p.printed_at)}</span></div>
         <div class="grams num">${fmtG(printGrams(p))}<div class="cost">${costText(p.filament_cost, p.energy_cost)}</div></div>
@@ -898,48 +926,51 @@ function updateUsageInfo() {
   updateEstimate();
 }
 
-// Když se tisk na cívku nevejde a existují další stejné cívky, zbytek se přesune na ně
-// (napřed načaté, pak neotevřené), aby se nemuselo počítat ručně.
+// Rozdělí gramy na cívku a podle potřeby na další stejné cívky (napřed načaté, pak neotevřené).
+// availableFn(spool) = kolik gramů z cívky ještě jde vzít; poslední cívka skupiny dostane zbytek,
+// i když se na ni nevejde. Cívky z `exclude` se jako další nepoužijí. Vrací [{ spool, grams }].
+function allocate(spool, grams, availableFn, exclude = new Set()) {
+  const available = round1(Math.max(0, availableFn(spool)));
+  if (grams <= available) return [{ spool, grams }];
+  const next = sortGroup(state.allSpools.filter(s =>
+    s.id !== spool.id && !exclude.has(s.id) && groupKey(s) === groupKey(spool)));
+  if (!next.length) return [{ spool, grams }];
+
+  const parts = [];
+  let rest = grams;
+  if (available > 0) {
+    parts.push({ spool, grams: available });
+    rest = round1(rest - available);
+  }
+  for (const [i, s] of next.entries()) {
+    if (rest <= 0) break;
+    const g = i === next.length - 1 ? rest : round1(Math.min(rest, Math.max(0, availableFn(s))));
+    if (g <= 0) continue;
+    parts.push({ spool: s, grams: g });
+    rest = round1(rest - g);
+  }
+  return parts;
+}
+
+// Když se tisk na cívku nevejde a existují další stejné cívky, zbytek se přesune na ně,
+// aby se nemuselo počítat ručně.
 function autoSplit(row) {
   const spool = state.allSpools.find(s => s.id === Number($('select', row).value));
   const grams = Number($('input', row).value) || 0;
   if (!spool || grams <= 0) return false;
-  const available = round1(Math.max(0, availableOn(spool, row).available));
-  if (grams <= available) return false;
-
   const taken = new Set($$('.usage-row select', printForm).map(sel => Number(sel.value)));
-  const next = sortGroup(state.allSpools.filter(s =>
-    s.id !== spool.id && !taken.has(s.id) && groupKey(s) === groupKey(spool)));
-  if (!next.length) return false;
+  const parts = allocate(spool, grams, s => availableOn(s, s === spool ? row : null).available, taken);
+  if (parts.length === 1 && parts[0].spool === spool) return false;
 
-  const parts = [];
-  const describe = (s, g) => `${fmtG(g)} z ${s.id === spool.id || isOpened(s) ? 'načaté' : 'neotevřené'} cívky`;
-  let rest = grams;
-  let reuseRow = row;
-  if (available > 0) {
-    $('input', row).value = available;
-    parts.push(describe(spool, available));
-    rest = round1(rest - available);
-    reuseRow = null;
-  }
-  for (const [i, s] of next.entries()) {
-    if (rest <= 0) break;
-    const g = i === next.length - 1 ? rest : round1(Math.min(rest, Math.max(0, availableOn(s).available)));
-    if (g <= 0) continue;
-    if (reuseRow) {
-      // Na původní cívce nezbylo nic, řádek se jen přepne na další.
-      $('select', reuseRow).value = s.id;
-      $('input', reuseRow).value = g;
-      reuseRow = null;
-    } else {
-      addUsageRow(s.id, g);
-    }
-    parts.push(describe(s, g));
-    rest = round1(rest - g);
-  }
+  // První část zůstane v řádku (na původní cívce nezbylo nic → řádek se jen přepne na další).
+  const [first, ...rest] = parts;
+  $('select', row).value = first.spool.id;
+  $('input', row).value = first.grams;
+  for (const p of rest) addUsageRow(p.spool.id, p.grams);
   updateUsageInfo();
-  toast(parts.length > 1 ? `Rozděleno: ${parts.join(' + ')}`
-    : `Na vybrané cívce nic nezbývá, použito ${parts[0]}`);
+  const describe = p => `${fmtG(p.grams)} z ${p.spool === spool || isOpened(p.spool) ? 'načaté' : 'neotevřené'} cívky`;
+  toast(parts.length > 1 ? `Rozděleno: ${parts.map(describe).join(' + ')}`
+    : `Na vybrané cívce nic nezbývá, použito ${describe(first)}`);
   return true;
 }
 
@@ -967,33 +998,61 @@ $('#add-usage').addEventListener('click', () => $('select', addUsageRow()).focus
 printForm.addEventListener('change', e => { if (e.target.name === 'status') updatePrintMode(); });
 printForm.addEventListener('input', e => { if (['dur_h', 'dur_m', 'percent'].includes(e.target.name)) updateEstimate(); });
 
-function openPrintForm(print = null, { spoolId = null, projectId = null, returnTo = null } = {}) {
+// copyOf = „Vytisknout znovu“ bez souboru: nový naplánovaný tisk se stejným názvem, projektem,
+// časem a cívkami; u nepovedeného tisku se gramy přepočtou na celý tisk.
+function openPrintForm(print = null, { spoolId = null, projectId = null, returnTo = null, copyOf = null } = {}) {
   if (!state.allSpools.length) {
     toast('Nejdřív přidejte alespoň jednu cívku', true);
     return openSpoolForm();
   }
   editingPrint = print;
   printReturnProject = returnTo;
+  const src = print ?? copyOf;
   printForm.reset();
   $('#usage-rows').innerHTML = '';
-  $('[data-title]', printForm).textContent = !print ? 'Nový tisk' : print.status === 'planned' ? 'Upravit naplánovaný tisk' : 'Upravit tisk';
+  $('[data-title]', printForm).textContent = copyOf ? 'Vytisknout znovu'
+    : !print ? 'Nový tisk' : print.status === 'planned' ? 'Upravit naplánovaný tisk' : 'Upravit tisk';
   $$('[data-edit-only]', printForm).forEach(el => el.hidden = !print);
-  printForm.elements.name.value = print?.name ?? '';
+  $$('[data-new-only]', printForm).forEach(el => el.hidden = !!src);
+  $('[data-action="reprint"]', printForm).hidden = !print || print.status === 'planned';
+  printForm.elements.name.value = src?.name ?? '';
   printForm.elements.printed_at.value = print?.printed_at ?? today();
-  printForm.elements.status.value = print?.status ?? 'ok';
+  printForm.elements.status.value = print?.status ?? (copyOf ? 'planned' : 'ok');
   printForm.elements.percent.value = print?.status === 'failed' ? print.percent : 50;
-  projectSelect.innerHTML = projectOptions(print ? print.project_id : projectId);
+  projectSelect.innerHTML = projectOptions(print ? print.project_id : copyOf ? copyOf.project_id : projectId);
   projectSelect.dataset.prev = projectSelect.value;
-  if (print?.duration_min != null) {
-    const t = Math.round(print.duration_min);
+  if (src?.duration_min != null) {
+    const t = Math.round(src.duration_min);
     printForm.elements.dur_h.value = Math.floor(t / 60) || '';
     printForm.elements.dur_m.value = t % 60 || '';
   }
   printForm.elements.notes.value = print?.notes ?? '';
+  renderPrintFile(print);
   if (print) print.usages.forEach(u => addUsageRow(u.spool_id, u.grams));
-  else addUsageRow(spoolId ?? (state.allSpools.length === 1 ? state.allSpools[0].id : null));
+  else if (copyOf?.usages.length) {
+    const factor = copyOf.status === 'failed' && copyOf.percent > 0 ? 100 / copyOf.percent : 1;
+    // Cívka, která mezitím šla z aktivního inventáře, se musí vybrat znovu.
+    copyOf.usages.forEach(u => addUsageRow(state.allSpools.some(s => s.id === u.spool_id) ? u.spool_id : null, round1(u.grams * factor)));
+  } else addUsageRow(spoolId ?? (state.allSpools.length === 1 ? state.allSpools[0].id : null));
   updatePrintMode();
+  if (copyOf) $$('.usage-row', printForm).forEach(autoSplit);
   printDialog.showModal();
+  // Jinak by fokus dostal první odkaz (Stáhnout 3MF); stav tisku je přirozený začátek formuláře.
+  $('input[name="status"]:checked', printForm)?.focus();
+}
+
+// Upravovaný tisk ze 3MF: větší náhled podložky a stažení souboru.
+function renderPrintFile(print) {
+  const el = $('#print-file');
+  el.hidden = !print?.file_id;
+  if (el.hidden) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    ${thumbImg(print.thumb_url, 'big')}
+    <div class="print-file-info">
+      <span class="hint">Soubor${print.plate_index ? ` · podložka ${print.plate_index}` : ''}</span>
+      <b>${esc(print.file_name || `soubor-${print.file_id}.3mf`)}</b>
+      <a class="btn small" href="/api/files/${print.file_id}/download" download>Stáhnout 3MF</a>
+    </div>`;
 }
 
 printDialog.addEventListener('close', async () => {
@@ -1008,6 +1067,8 @@ printDialog.addEventListener('close', async () => {
       duration_min: durationValue(),
       project_id: project && project !== 'new' ? Number(project) : null,
       notes: printForm.elements.notes.value,
+      file_id: editingPrint?.file_id ?? null,
+      plate_index: editingPrint?.plate_index ?? null,
       usages: $$('.usage-row', printForm).map(r => ({ spool_id: $('select', r).value, grams: $('input', r).value })),
     };
     try {
@@ -1023,6 +1084,13 @@ printDialog.addEventListener('close', async () => {
     printReturnProject = null;
     openProject(id);
   }
+});
+
+$('[data-action="reprint"]', printForm).addEventListener('click', () => {
+  const print = editingPrint;
+  printReturnProject = null;
+  printDialog.close('cancel');
+  reprint(print);
 });
 
 // Smazání tisku: u proběhlého tisku se ptáme, jestli šlo o chybný záznam (gramy vrátit),
@@ -1050,6 +1118,478 @@ deletePrintDialog.addEventListener('close', async () => {
     await refresh();
   } catch (err) { toast(err.message, true); }
 });
+
+// --- Import 3MF ---
+
+// Párování filamentu z Bambu Studia s cívkou. Materiál: „PLA Basic/Matte…“ = PLA (shoda podle
+// prvního slova), „PLA+“ / „PLA Pro“ ≈ PLA jen jako slabší shoda; „PLA-CF“ je jiný materiál.
+function materialKey(m) {
+  const [first = '', second = ''] = String(m ?? '').trim().toUpperCase().split(/\s+/);
+  return { base: first.replace(/\+$/, ''), plus: first.endsWith('+') || second === 'PRO' || second === '+' };
+}
+function materialMatch(a, b) {
+  const x = materialKey(a), y = materialKey(b);
+  if (!x.base || x.base !== y.base) return 0;
+  return x.plus === y.plus ? 2 : 1;
+}
+const hexRgb = hex => {
+  const m = /^#?([0-9a-f]{6})/i.exec(String(hex ?? ''));
+  return m ? [0, 8, 16].map(sh => (parseInt(m[1], 16) >> (16 - sh)) & 255) : null;
+};
+function colorDistance(a, b) {
+  const x = hexRgb(a), y = hexRgb(b);
+  return x && y ? Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) : Infinity;
+}
+const COLOR_MATCH = 60; // RGB vzdálenost, do které barvu cívky bereme jako shodnou
+
+// Skupiny stejných cívek, které sedí na filament; nejlepší první (materiál, pak bližší barva).
+function matchGroups(fil) {
+  const scored = state.allSpools
+    .map(s => ({ s, mat: materialMatch(s.material, fil.type), dist: colorDistance(s.color_hex, fil.color) }))
+    .filter(x => x.mat > 0 && x.dist <= COLOR_MATCH);
+  return [...Map.groupBy(scored, x => groupKey(x.s)).values()]
+    .map(list => ({ spools: sortGroup(list.map(x => x.s)), mat: Math.max(...list.map(x => x.mat)), dist: Math.min(...list.map(x => x.dist)) }))
+    .sort((a, b) => b.mat - a.mat || a.dist - b.dist);
+}
+
+// Návrh cívky: přednost mají cívky původního tisku (Vytisknout znovu), pokud stačí. Jinak z nejlepší
+// skupiny načatá s nejmenším zůstatkem, na kterou se tisk vejde; když žádná, ta s největším zůstatkem
+// (zbytek rozdělí allocate na další stejné cívky).
+function suggestSpool(fil, need, avail, preferred = []) {
+  const pref = preferred.map(id => state.allSpools.find(s => s.id === id)).find(s => s && avail(s) >= need);
+  if (pref) return { spool: pref, weak: false };
+  const groups = matchGroups(fil);
+  if (!groups.length) return null;
+  const total = g => g.spools.reduce((a, s) => a + Math.max(0, avail(s)), 0);
+  // Mezi skoro stejně dobrými skupinami (jiná značka téže barvy) vyhraje ta, na kterou se tisk vejde.
+  const best = groups.find(g => g.mat === groups[0].mat && g.dist <= groups[0].dist + 10 && total(g) >= need) ?? groups[0];
+  const fits = best.spools.filter(s => avail(s) >= need);
+  const spool = fits.find(isOpened) ?? fits[0] ?? best.spools.reduce((a, s) => avail(s) > avail(a) ? s : a);
+  return { spool, weak: best.mat === 1 };
+}
+
+const importDialog = $('#import-dialog');
+const importForm = $('#import-form');
+const importFileInput = $('#import-file');
+let imp = null;          // rozpracovaný import: { file, plates, assign, preferred, names, rowsKey }
+let importXhr = null;
+let importOptions = {};  // projekt předvybraný při otevření z formuláře tisku
+
+const plateLabel = p => p.name || `Podložka ${p.index}`;
+const filLabel = f => esc(f.type || '?');
+// „Generic · Generic PLA“ → jen „Generic PLA“
+// „Bambu PLA Basic @BBL X1C-1(projekt.3mf)“ → „Bambu PLA Basic“ (zbytek je jen profil tiskárny).
+const profileName = id => (id || '').replace(/\s*@.*$/, '');
+const filVendor = f => {
+  const name = profileName(f.settings_id);
+  return name && f.vendor && name.startsWith(f.vendor) ? name : [f.vendor, name].filter(Boolean).join(' · ');
+};
+
+function uploadFile(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = importXhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/files');
+    xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded, e.total);
+    xhr.onload = () => {
+      importXhr = null;
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* chyba bez JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || `Chyba ${xhr.status}`));
+    };
+    xhr.onerror = () => { importXhr = null; reject(new Error('Nahrání se nepovedlo')); };
+    xhr.onabort = () => { importXhr = null; reject(new DOMException('Zrušeno', 'AbortError')); };
+    xhr.send(file);
+  });
+}
+
+function openImportShell(info) {
+  imp = null;
+  importForm.reset();
+  $('#import-info').textContent = info;
+  $('#import-body').hidden = true;
+  $('#import-progress').hidden = false;
+  $('#import-submit').disabled = true;
+  $('#import-submit').textContent = 'Naplánovat';
+  if (!importDialog.open) importDialog.showModal();
+}
+
+function setUploadProgress(loaded, total) {
+  const done = total ? loaded / total : 0;
+  $('#import-progress progress').value = Math.round(done * 100);
+  $('#import-progress [data-progress-text]').textContent = done >= 1
+    ? `Čtu projekt… (${fmtSize(total)})` : `Nahrávám… ${fmtSize(loaded)} z ${fmtSize(total)}`;
+}
+
+async function startImport(file, options = importOptions) {
+  importOptions = {};
+  if (!/\.3mf$/i.test(file.name)) return toast('Vyberte projekt z Bambu Studia (.3mf)', true);
+  openImportShell(`${file.name} · ${fmtSize(file.size)}`);
+  setUploadProgress(0, file.size);
+  try {
+    const data = await uploadFile(file, setUploadProgress);
+    if (importDialog.open) showImport(data, options);
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    importDialog.close('cancel');
+    toast(err.message, true);
+  }
+}
+
+// options: projectId (předvybraný projekt), reprint (původní tisk → jen jeho podložka,
+// gramy z tisku, když je soubor nemá, a přednostně jeho cívky).
+function showImport(file, { projectId = null, reprint = null } = {}) {
+  const meta = file.meta;
+  // Typ/barva/vendor filamentu můžou chybět; indexy podložek nemusí začínat od 1 (.gcode.3mf).
+  const plates = meta.plates.map(p => ({
+    ...p,
+    thumb_url: p.thumb_url ?? null,
+    filaments: (p.filaments ?? []).map(f => ({ ...f, color: hexRgb(f.color) ? f.color : '#888888' })),
+  }));
+  imp = { file, plates, assign: new Map(), preferred: new Map(), names: new Map(), rowsKey: '' };
+  const grams = new Map(); // `${plate}:${fil}` → předvyplněné gramy
+  const durations = new Map(plates.map(p => [p.index, p.duration_min]));
+
+  if (reprint) {
+    const plate = plates.find(p => p.index === reprint.plate_index);
+    imp.names.set(plate.index, reprint.name);
+    if (durations.get(plate.index) == null) durations.set(plate.index, reprint.duration_min);
+    // Spotřebu původního tisku přiřadíme k filamentům podložky podle materiálu a barvy.
+    const factor = reprint.status === 'failed' && reprint.percent > 0 ? 100 / reprint.percent : 1;
+    const fromPrint = new Map();
+    for (const u of reprint.usages) {
+      const fil = plate.filaments.length === 1 ? plate.filaments[0] : [...plate.filaments].sort((a, b) =>
+        (materialMatch(u.material, b.type) > 0) - (materialMatch(u.material, a.type) > 0)
+        || colorDistance(u.color_hex, a.color) - colorDistance(u.color_hex, b.color))[0];
+      if (!fil) continue;
+      imp.preferred.set(fil.id, [...(imp.preferred.get(fil.id) ?? []), u.spool_id]);
+      fromPrint.set(fil.id, (fromPrint.get(fil.id) ?? 0) + u.grams * factor);
+    }
+    for (const f of plate.filaments) {
+      const g = f.used_g ?? fromPrint.get(f.id);
+      if (g != null) grams.set(`${plate.index}:${f.id}`, round1(g));
+    }
+  } else {
+    for (const p of plates) for (const f of p.filaments) if (f.used_g != null) grams.set(`${p.index}:${f.id}`, round1(f.used_g));
+  }
+
+  $('#import-info').textContent = `${file.filename} · ${fmtSize(file.size)}`;
+  const unsliced = plates.filter(p => p.sliced === false).length;
+  $('#import-unsliced').hidden = !unsliced;
+  $('#import-unsliced').textContent = unsliced === plates.length
+    ? 'Projekt není uložený po slicování – gramy doplň ručně (příště stačí v Bambu Studiu po slicování uložit projekt).'
+    : 'Některé podložky nejsou naslicované – u nich doplň gramy ručně.';
+  $('#import-plates').innerHTML = plates.map(p => {
+    const checked = (reprint ? p.index === reprint.plate_index : true) && p.filaments.length > 0;
+    const dur = durations.get(p.index);
+    const t = dur != null ? Math.round(dur) : null;
+    return `
+    <article class="plate${checked ? '' : ' off'}" data-plate="${p.index}">
+      <div class="plate-thumb">${thumbImg(p.thumb_url, 'big', true)}</div>
+      <div class="plate-body">
+        <label class="check plate-title"><input type="checkbox" data-plate-check${checked ? ' checked' : ''}${p.filaments.length ? '' : ' disabled'}>
+          <b>${esc(plateLabel(p))}</b>${p.weight_g != null ? ` <span class="hint num">${fmtG(p.weight_g)}</span>` : ''}
+          ${p.sliced === false && plates.some(x => x.sliced !== false) ? '<span class="tag warn">gramy ručně</span>' : ''}</label>
+        ${p.filaments.length ? p.filaments.map(f => `
+        <div class="plate-fil">
+          <span class="chip"><span class="dot" style="--c:${esc(f.color)}"></span>${filLabel(f)}</span>
+          <span class="hint fil-vendor">${esc(profileName(f.settings_id) || f.vendor || '')}</span>
+          <div class="unit-input" data-unit="g"><input type="text" inputmode="decimal" pattern="\\d*[.,]?\\d*" placeholder="0"
+            data-g data-fil="${f.id}" value="${grams.get(`${p.index}:${f.id}`) ?? ''}" aria-label="Gramy, ${esc(plateLabel(p))}, ${filLabel(f)}"></div>
+        </div>`).join('') : '<p class="hint">Na podložce nic není.</p>'}
+        <div class="plate-fil plate-time">
+          <span class="hint">Čas tisku</span>
+          <div class="duration">
+            <div class="unit-input" data-unit="h"><input type="text" inputmode="numeric" pattern="\\d*" placeholder="0" data-dur-h value="${t != null ? Math.floor(t / 60) || '' : ''}" aria-label="Hodiny, ${esc(plateLabel(p))}"></div>
+            <div class="unit-input" data-unit="min"><input type="text" inputmode="numeric" pattern="\\d*" placeholder="0" data-dur-m value="${t != null ? t % 60 || '' : ''}" aria-label="Minuty, ${esc(plateLabel(p))}"></div>
+          </div>
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+
+  const title = meta.title || file.filename.replace(/(\.gcode)?\.3mf$/i, '');
+  imp.title = title;
+  const sameName = state.projects.find(p => p.status !== 'done' && p.name.trim().toLowerCase() === title.trim().toLowerCase());
+  const selected = reprint ? reprint.project_id : projectId ?? sameName?.id ?? (plates.length > 1 ? 'new' : null);
+  const list = state.projects.filter(p => p.status !== 'done' || p.id === selected);
+  $('#import-project').innerHTML = '<option value="">— žádný —</option>'
+    + `<option value="new"${selected === 'new' ? ' selected' : ''}>+ Nový: ${esc(title)}</option>`
+    + list.map(p => `<option value="${p.id}"${p.id === selected ? ' selected' : ''}>${esc(p.name)}${p.status === 'done' ? ' (hotový)' : ''}</option>`).join('');
+
+  $('#import-progress').hidden = true;
+  $('#import-body').hidden = false;
+  syncImport();
+  // Většina projektů není naslicovaná → rovnou do prvního prázdného pole gramů.
+  const empty = $$('#import-plates input[data-g]:not(:disabled)').find(i => !i.value);
+  (empty ?? $('#import-submit')).focus();
+}
+
+const plateCards = () => $$('#import-plates .plate');
+const plateGrams = card => $$('input[data-g]', card).map(i => ({ id: Number(i.dataset.fil), grams: round1(Number(i.value) || 0), input: i }));
+const plateDuration = card => {
+  const t = (Number($('[data-dur-h]', card).value) || 0) * 60 + (Number($('[data-dur-m]', card).value) || 0);
+  return t > 0 ? t : null;
+};
+
+// Filamenty vybraných podložek (gramy sečtené přes podložky) a jejich rozdělení na cívky.
+// Rezervace jiných naplánovaných tisků i gramy dřívějších řádků tohoto importu se odečítají.
+function planImport() {
+  const fils = new Map();
+  for (const card of plateCards()) {
+    if (!$('[data-plate-check]', card).checked) continue;
+    const plate = imp.plates.find(p => p.index === Number(card.dataset.plate));
+    for (const { id, grams } of plateGrams(card)) {
+      const f = fils.get(id) ?? { ...plate.filaments.find(f => f.id === id), need: 0 };
+      f.need = round1(f.need + grams);
+      fils.set(id, f);
+    }
+  }
+  const used = new Map();
+  const avail = s => s.remaining - (s.reserved ?? 0) - (used.get(s.id) ?? 0);
+  const list = [...fils.values()].sort((a, b) => a.id - b.id);
+  for (const f of list) {
+    if (imp.assign.has(f.id)) {
+      f.spool = state.allSpools.find(s => s.id === imp.assign.get(f.id)) ?? null;
+      f.weak = f.spool ? materialMatch(f.spool.material, f.type) === 1 : false;
+    } else {
+      const sug = suggestSpool(f, f.need, avail, imp.preferred.get(f.id));
+      f.spool = sug?.spool ?? null;
+      f.weak = sug?.weak ?? false;
+      f.matched = !!sug;
+    }
+    f.parts = f.spool && f.need > 0 ? allocate(f.spool, f.need, avail) : [];
+    f.fits = f.parts.every(p => p.grams <= round1(Math.max(0, avail(p.spool))));
+    for (const p of f.parts) used.set(p.spool.id, (used.get(p.spool.id) ?? 0) + p.grams);
+  }
+  return list;
+}
+
+function filStatus(f) {
+  const create = '<button type="button" class="btn small" data-create-spool>Založit novou cívku</button>';
+  const weak = f.weak ? ` <span class="hint">(cívka je ${esc(f.spool.material)})</span>` : '';
+  if (!f.spool) {
+    return imp.assign.has(f.id) ? `<span class="hint">Vyberte cívku</span> ${create}`
+      : `<span class="status warn">⚠ žádná cívka nesedí</span> ${create}`;
+  }
+  if (f.need <= 0) return '<span class="hint">doplňte gramy</span>';
+  if (!f.fits) return `<span class="status warn">⚠ nestačí ani se stejnými cívkami</span>${weak} ${create}`;
+  if (f.parts.length > 1) {
+    return `<span class="status">rozdělí se na další stejnou cívku</span> <span class="hint num">${f.parts.map(p => fmtG(p.grams)).join(' + ')}</span>${weak}`;
+  }
+  return `<span class="status ok">✓ vejde se</span>${weak}`;
+}
+
+function syncImport() {
+  if (!imp) return;
+  let count = 0;
+  for (const card of plateCards()) {
+    const on = $('[data-plate-check]', card).checked;
+    card.classList.toggle('off', !on);
+    $$('input[data-g], [data-dur-h], [data-dur-m]', card).forEach(i => i.disabled = !on);
+    const rows = plateGrams(card);
+    rows.forEach(r => r.input.setCustomValidity(''));
+    if (on) {
+      count++;
+      if (rows.length && !rows.some(r => r.grams > 0)) rows[0].input.setCustomValidity('Doplňte gramy alespoň u jednoho filamentu');
+    }
+  }
+
+  const fils = planImport();
+  const box = $('#import-filaments');
+  const key = fils.map(f => f.id).join(',');
+  if (key !== imp.rowsKey) {
+    imp.rowsKey = key;
+    box.innerHTML = fils.length ? fils.map(f => `
+      <div class="fil-row" data-fil="${f.id}">
+        <div class="fil-info">
+          <span class="chip"><span class="dot" style="--c:${esc(f.color)}"></span>${filLabel(f)}</span>
+          <span class="hint fil-vendor">${esc(filVendor(f))}</span>
+        </div>
+        <span class="fil-need num" data-need></span>
+        <select data-fil-spool aria-label="Cívka pro ${filLabel(f)} ${esc(f.color)}"></select>
+        <div class="fil-status" data-status></div>
+      </div>`).join('') : '<p class="hint">Vyberte alespoň jednu podložku.</p>';
+  }
+  for (const f of fils) {
+    const row = $(`.fil-row[data-fil="${f.id}"]`, box);
+    $('[data-need]', row).textContent = f.need > 0 ? fmtG(f.need) : '— g';
+    const sel = $('[data-fil-spool]', row);
+    const value = String(f.spool?.id ?? '');
+    if (sel.dataset.built !== state.allSpools.map(s => s.id).join(',') || sel.value !== value) {
+      sel.innerHTML = spoolOptions(f.spool?.id ?? null);
+      sel.dataset.built = state.allSpools.map(s => s.id).join(',');
+    }
+    sel.required = f.need > 0;
+    $('[data-status]', row).innerHTML = filStatus(f);
+  }
+  const submit = $('#import-submit');
+  submit.disabled = !count;
+  submit.textContent = count ? `Naplánovat ${count} ${plural(count, 'tisk', 'tisky', 'tisků')}` : 'Naplánovat';
+}
+
+// Tělo POST /api/prints/import: rozdělení filamentu na cívky (planImport) se rozpočítá na podložky
+// v pořadí, takže jedna podložka může mít víc řádků spotřeby.
+function importBody() {
+  const fils = planImport();
+  const queues = new Map(fils.map(f => [f.id, f.parts.map(p => ({ id: p.spool.id, grams: p.grams }))]));
+  const multi = imp.plates.length > 1;
+  const prints = [];
+  for (const card of plateCards()) {
+    if (!$('[data-plate-check]', card).checked) continue;
+    const plate = imp.plates.find(p => p.index === Number(card.dataset.plate));
+    const usages = new Map();
+    for (const { id, grams } of plateGrams(card)) {
+      const queue = queues.get(id) ?? [];
+      let rest = grams;
+      let last = null;
+      while (rest > 0 && queue.length) {
+        const part = queue[0];
+        const take = round1(Math.min(rest, part.grams));
+        usages.set(part.id, round1((usages.get(part.id) ?? 0) + take));
+        last = part.id;
+        part.grams = round1(part.grams - take);
+        rest = round1(rest - take);
+        if (part.grams <= 0) queue.shift();
+      }
+      // Zaokrouhlovací zbytek (desetiny gramu) na poslední použitou cívku.
+      if (rest > 0 && last != null) usages.set(last, round1(usages.get(last) + rest));
+    }
+    prints.push({
+      plate_index: plate.index,
+      name: imp.names.get(plate.index) ?? (multi ? `${imp.title} – ${plate.name || `podložka ${plate.index}`}` : imp.title),
+      duration_min: plateDuration(card),
+      usages: [...usages].map(([spool_id, grams]) => ({ spool_id, grams })),
+    });
+  }
+  const project = $('#import-project').value;
+  return {
+    file_id: imp.file.id,
+    project_id: project && project !== 'new' ? Number(project) : null,
+    new_project_name: project === 'new' ? imp.title : null,
+    prints,
+  };
+}
+
+importForm.addEventListener('input', e => {
+  if (e.target.matches('input[data-g], [data-plate-check]')) syncImport();
+});
+importForm.addEventListener('change', e => {
+  if (e.target.matches('[data-plate-check]')) {
+    syncImport();
+    if (e.target.checked) $$('input[data-g]', e.target.closest('.plate')).find(i => !i.value)?.focus();
+  }
+  if (e.target.matches('[data-fil-spool]')) {
+    imp.assign.set(Number(e.target.closest('.fil-row').dataset.fil), Number(e.target.value) || null);
+    syncImport();
+  }
+});
+// Enter v poli gramů skočí na další prázdné pole; formulář odešle až u posledního.
+importForm.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !e.target.matches('input[data-g]')) return;
+  const inputs = $$('#import-plates input[data-g]:not(:disabled)');
+  const next = inputs.slice(inputs.indexOf(e.target) + 1).find(i => !i.value);
+  if (next) { e.preventDefault(); next.focus(); }
+});
+importForm.addEventListener('click', e => {
+  if (!e.target.closest('[data-create-spool]')) return;
+  const filId = Number(e.target.closest('.fil-row').dataset.fil);
+  const fil = imp.plates.flatMap(p => p.filaments).find(f => f.id === filId);
+  openSpoolForm(null, {
+    prefill: {
+      brand: fil.vendor && fil.vendor !== 'Generic' ? fil.vendor : '',
+      material: fil.type ?? '',
+      color_hex: /^#[0-9a-f]{6}$/i.test(fil.color ?? '') ? fil.color.toLowerCase() : '#e8743b',
+    },
+    onSaved: spool => {
+      if (!imp || !spool) return;
+      imp.assign.set(filId, spool.id);
+      syncImport();
+    },
+  });
+});
+
+importDialog.addEventListener('close', async () => {
+  importXhr?.abort();
+  if (importDialog.returnValue !== 'save' || !imp) return;
+  const body = importBody();
+  try {
+    const res = await api('/prints/import', { method: 'POST', body });
+    const n = res.prints?.length ?? body.prints.length;
+    toast(`Naplánováno: ${n} ${plural(n, 'tisk', 'tisky', 'tisků')}`);
+    imp = null;
+    await refresh();
+    setTab('inventory');
+    scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (err) { toast(err.message, true); importDialog.showModal(); }
+});
+
+function pickImportFile(options = {}) {
+  importOptions = options;
+  importFileInput.value = '';
+  importFileInput.click();
+}
+
+importFileInput.addEventListener('change', () => {
+  const file = importFileInput.files[0];
+  if (!file) return;
+  // Import z formuláře nového tisku ho nahradí.
+  if (printDialog.open) { printReturnProject = null; printDialog.close('cancel'); }
+  startImport(file);
+});
+$('#import-3mf').addEventListener('click', () => pickImportFile());
+$('#print-import').addEventListener('click', () => {
+  const project = projectSelect.value;
+  pickImportFile({ projectId: project && project !== 'new' ? Number(project) : null });
+});
+
+// Přetažení .3mf kamkoli do okna (jen když není otevřené jiné okno než nový tisk).
+let dragDepth = 0;
+const draggingFiles = e => e.dataTransfer?.types.includes('Files');
+addEventListener('dragenter', e => {
+  if (!draggingFiles(e)) return;
+  dragDepth++;
+  document.body.classList.add('dropping');
+});
+addEventListener('dragleave', e => {
+  if (!draggingFiles(e) || --dragDepth > 0) return;
+  dragDepth = 0;
+  document.body.classList.remove('dropping');
+});
+addEventListener('dragover', e => { if (draggingFiles(e)) e.preventDefault(); });
+addEventListener('drop', e => {
+  if (!draggingFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dropping');
+  const file = [...e.dataTransfer.files].find(f => /\.3mf$/i.test(f.name));
+  if (!file) return toast('Přetáhněte projekt z Bambu Studia (.3mf)', true);
+  if ($$('dialog[open]').some(d => d !== printDialog || editingPrint)) return toast('Nejdřív zavřete otevřené okno', true);
+  if (printDialog.open) { printReturnProject = null; printDialog.close('cancel'); }
+  startImport(file);
+});
+
+// Vytisknout znovu: ze souboru přes import (jen ta podložka), bez souboru jako kopie ve formuláři.
+async function reprint(print) {
+  if (print.file_id) {
+    openImportShell('Načítám soubor…');
+    setUploadProgress(1, 0);
+    try {
+      const file = await api(`/files/${print.file_id}`);
+      if (file.meta.plates.some(p => p.index === print.plate_index)) {
+        if (importDialog.open) showImport(file, { reprint: print });
+        return;
+      }
+      importDialog.close('cancel');
+    } catch (err) {
+      importDialog.close('cancel');
+      toast(err.message, true);
+    }
+  }
+  openPrintForm(null, { copyOf: print });
+}
 
 // --- Nastavení ---
 

@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Vždycky víš, kolik filamentu ti zbývá.</b><br>
-  Domácí evidence cívek pro 3D tisk: inventář, spotřeba podle tisků a (brzy) archiv 3MF projektů.
+  Domácí evidence cívek pro 3D tisk: inventář, spotřeba podle tisků a archiv 3MF projektů.
 </p>
 
 <p align="center">
@@ -42,6 +42,10 @@ filamentu tento měsíc prošlo tiskárnou.
 - 💰 **Cena tisku**: filament podle ceny cívky a elektřina podle času tisku. Počítá se v dolarech
   (cívku jde zadat i v eurech nebo korunách) a vedle je přepočet na koruny podle denního kurzu ČNB.
   Když cena chybí, aplikace napíše „cena neznámá“, nikdy si nevymyslí nulu.
+- 📂 **Import 3MF z Bambu Studia**: nahraješ projekt (nebo ho přetáhneš do okna) a aplikace z něj
+  vytáhne podložky s náhledy, filamenty, a když je projekt uložený po slicování, i gramáž a čas.
+  Filamenty sama napáruje na tvoje cívky a založí naplánované tisky. Soubor zůstane u tisku ke stažení
+  a jedním tlačítkem ho vytiskneš znovu.
 - ⚠️ **Upozornění, že dochází**: cívky pod nastavenou hranicí jsou vidět na první pohled.
 - 📊 **Přehled**: kolik máš skladem, kolik dochází a kolik se spotřebovalo tento měsíc.
 - 💾 **Záloha jedním klikem**: export celé databáze ke stažení.
@@ -53,11 +57,11 @@ filamentu tento měsíc prošlo tiskárnou.
 | --- | --- | --- |
 | 1 | Docker image pro NAS, migrace databáze, nastavení | ✅ hotovo |
 | 2 | Projekty, fronta naplánovaných tisků, cena tisku (filament + elektřina) | ✅ hotovo |
-| 3 | Import 3MF z Bambu Studia: gramáž po filamentech, náhled, „vytisknout znovu“ | 🔜 další |
-| 4 | Ikona na plochu mobilu (PWA) a doladění mobilu | ⏳ plán |
+| 3 | Import 3MF z Bambu Studia: gramáž po filamentech, náhled, „vytisknout znovu“ | ✅ hotovo |
+| 4 | Ikona na plochu mobilu (PWA) a doladění mobilu | 🔜 další |
 
-Cílový postup: po slicování nahraješ 3MF na počítači a tisk se sám zařadí do fronty se správnou
-gramáží i časem. Po dotisku na mobilu klepneš **Hotovo** nebo **Selhalo**.
+Postup: po slicování uložíš projekt, nahraješ 3MF na počítači a tisk se sám zařadí do fronty se
+správnou gramáží i časem. Po dotisku na mobilu klepneš **Hotovo** nebo **Selhalo**.
 
 ## Pro koho
 

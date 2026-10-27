@@ -1,10 +1,12 @@
 import express from 'express';
-import { rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { costParams, db, getSettings, PRICE_PER_G, PRINT_SELECT, rateParams, saveSettings, SETTINGS_DEFAULTS, SPOOL_SELECT, tx } from './db.js';
+import { costParams, db, FILES_DIR, getSettings, PRICE_PER_G, PRINT_SELECT, rateParams, saveSettings, SETTINGS_DEFAULTS, SPOOL_SELECT, tx } from './db.js';
 import { getRates, refreshRates, scheduleRateRefresh } from './rates.js';
+import { parse3mf, ThreeMfError } from './threemf.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -51,7 +53,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 // Naplánované podle pořadí zadání, ostatní od nejnovějšího.
 const PRINT_ORDER = `ORDER BY p.status = 'planned' DESC,
-  CASE WHEN p.status = 'planned' THEN p.created_at END, p.printed_at DESC, p.id DESC`;
+  CASE WHEN p.status = 'planned' THEN p.created_at END, CASE WHEN p.status = 'planned' THEN p.id END,
+  p.printed_at DESC, p.id DESC`;
 
 // Tisky včetně usages; where/params jsou pojmenované ($...).
 function loadPrints(where = '', params = {}) {
@@ -240,7 +243,20 @@ function pickPrint(body) {
     duration_min,
     project_id,
     notes: String(body.notes ?? ''),
+    ...pickFileLink(body),
   };
+}
+
+// Vazba tisku na podložku nahraného 3MF; chybějící/null pole vazbu ruší (i u PUT).
+function pickFileLink(body) {
+  if (body.file_id === '' || body.file_id == null) return { file_id: null, plate_index: null };
+  const file = getFile(body.file_id, 400);
+  if (body.plate_index === '' || body.plate_index == null) throw new HttpError(400, 'Chybí číslo podložky');
+  const plate_index = Number(body.plate_index);
+  if (!file.meta.plates.some(p => p.index === plate_index)) {
+    throw new HttpError(400, `Soubor ${file.filename} nemá podložku ${body.plate_index}`);
+  }
+  return { file_id: file.id, plate_index };
 }
 
 app.post('/api/prints', (req, res) => {
@@ -248,13 +264,48 @@ app.post('/api/prints', (req, res) => {
   const usages = validateUsages(req.body.usages, p.status === 'failed');
   const id = tx(() => {
     const { lastInsertRowid } = db.prepare(`
-      INSERT INTO prints (name, printed_at, status, percent, duration_min, project_id, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(p.name, p.printed_at, p.status, p.percent, p.duration_min, p.project_id, p.notes);
+      INSERT INTO prints (name, printed_at, status, percent, duration_min, project_id, notes, file_id, plate_index)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(p.name, p.printed_at, p.status, p.percent, p.duration_min, p.project_id, p.notes, p.file_id, p.plate_index);
     insertUsages(lastInsertRowid, usages);
     return lastInsertRowid;
   });
   res.status(201).json(getPrint(id));
+});
+
+// Import podložek z nahraného 3MF jako naplánované tisky, volitelně do nového projektu.
+app.post('/api/prints/import', (req, res) => {
+  const file = getFile(req.body.file_id, 400);
+  const rows = req.body.prints;
+  if (!Array.isArray(rows) || rows.length === 0) throw new HttpError(400, 'Vyberte alespoň jednu podložku');
+
+  const existingProject = req.body.project_id !== '' && req.body.project_id != null;
+  const newName = String(req.body.new_project_name ?? '').trim();
+  const prints = rows.map(r => {
+    const p = pickPrint({ ...r, status: 'planned', notes: r.notes ?? '', printed_at: today(),
+      project_id: existingProject ? req.body.project_id : null, file_id: file.id });
+    return { ...p, usages: validateUsages(r.usages) };
+  });
+
+  const result = tx(() => {
+    let project_id = existingProject ? prints[0].project_id : null;
+    if (!existingProject && newName) {
+      project_id = Number(db.prepare('INSERT INTO projects (name) VALUES (?)').run(newName).lastInsertRowid);
+    }
+    const stmt = db.prepare(`
+      INSERT INTO prints (name, printed_at, status, percent, duration_min, project_id, notes, file_id, plate_index)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const ids = prints.map(p => {
+      const { lastInsertRowid } = stmt.run(p.name, p.printed_at, p.status, p.percent, p.duration_min,
+        project_id, p.notes, p.file_id, p.plate_index);
+      insertUsages(lastInsertRowid, p.usages);
+      return Number(lastInsertRowid);
+    });
+    return { project_id, ids };
+  });
+  const byId = new Map(loadPrints('p.id IN (SELECT value FROM json_each($ids))', { ids: JSON.stringify(result.ids) })
+    .map(p => [p.id, p]));
+  res.status(201).json({ project_id: result.project_id, prints: result.ids.map(id => byId.get(id)) });
 });
 
 app.put('/api/prints/:id', (req, res) => {
@@ -264,8 +315,9 @@ app.put('/api/prints/:id', (req, res) => {
   tx(() => {
     db.prepare(`
       UPDATE prints SET name = ?, printed_at = ?, status = ?, percent = ?, duration_min = ?,
-        project_id = ?, notes = ? WHERE id = ?`
-    ).run(p.name, p.printed_at, p.status, p.percent, p.duration_min, p.project_id, p.notes, req.params.id);
+        project_id = ?, notes = ?, file_id = ?, plate_index = ? WHERE id = ?`
+    ).run(p.name, p.printed_at, p.status, p.percent, p.duration_min, p.project_id, p.notes,
+      p.file_id, p.plate_index, req.params.id);
     db.prepare('DELETE FROM print_usages WHERE print_id = ?').run(req.params.id);
     insertUsages(req.params.id, usages);
   });
@@ -311,6 +363,84 @@ app.delete('/api/prints/:id', (req, res) => {
     db.prepare('DELETE FROM prints WHERE id = ?').run(print.id);
   });
   res.status(204).end();
+});
+
+// --- Soubory 3MF ---
+
+const filePath = id => join(FILES_DIR, `${id}.3mf`);
+const thumbPath = (id, plate) => join(FILES_DIR, `${id}-${plate}.png`);
+
+// status: 404 u přímého dotazu na soubor, 400 když na něj odkazuje tělo požadavku.
+function getFile(id, status = 404) {
+  const row = db.prepare('SELECT * FROM files WHERE id = ?').get(Number(id));
+  if (!row) throw new HttpError(status, `Soubor #${id} neexistuje`);
+  return { ...row, meta: JSON.parse(row.meta) };
+}
+
+function fileJson(file) {
+  const { sha256, ...rest } = file;
+  return {
+    ...rest,
+    meta: {
+      ...file.meta,
+      plates: file.meta.plates.map(p => ({ ...p, thumb_url: p.has_thumb ? `/api/files/${file.id}/plates/${p.index}.png` : null })),
+    },
+  };
+}
+
+// Tělo je celý soubor (ne multipart), název v hlavičce X-Filename (URI-encoded).
+app.post('/api/files', express.raw({ type: '*/*', limit: '250mb' }), (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) throw new HttpError(400, 'Prázdný soubor');
+  let filename;
+  try {
+    filename = decodeURIComponent(req.get('X-Filename') || '').split(/[\\/]/).pop().trim();
+  } catch {
+    throw new HttpError(400, 'Neplatný název souboru');
+  }
+  if (!filename) filename = 'projekt.3mf';
+
+  const sha256 = createHash('sha256').update(req.body).digest('hex');
+  const existing = db.prepare('SELECT id FROM files WHERE sha256 = ?').get(sha256);
+  if (existing) return res.json(fileJson(getFile(existing.id)));
+
+  let parsed;
+  try {
+    parsed = parse3mf(req.body, filename);
+  } catch (err) {
+    if (err instanceof ThreeMfError) throw new HttpError(400, err.message);
+    throw err;
+  }
+  const { meta, thumbs } = parsed;
+  // Zápis na disk uvnitř transakce: když selže, řádek se nevloží a rozepsané soubory se uklidí.
+  const id = Number(tx(() => {
+    const { lastInsertRowid: newId } = db.prepare('INSERT INTO files (filename, sha256, size, meta) VALUES (?, ?, ?, ?)')
+      .run(filename, sha256, req.body.length, JSON.stringify(meta));
+    try {
+      writeFileSync(filePath(newId), req.body);
+      for (const [plate, png] of thumbs) writeFileSync(thumbPath(newId, plate), png);
+    } catch (err) {
+      rmSync(filePath(newId), { force: true });
+      for (const plate of thumbs.keys()) rmSync(thumbPath(newId, plate), { force: true });
+      throw err;
+    }
+    return newId;
+  }));
+  res.status(201).json(fileJson(getFile(id)));
+});
+
+app.get('/api/files/:id', (req, res) => res.json(fileJson(getFile(req.params.id))));
+
+app.get('/api/files/:id/download', (req, res, next) => {
+  const file = getFile(req.params.id);
+  if (!existsSync(filePath(file.id))) throw new HttpError(404, 'Soubor chybí na disku');
+  res.download(filePath(file.id), file.filename, err => { if (err && !res.headersSent) next(err); });
+});
+
+app.get('/api/files/:id/plates/:n.png', (req, res, next) => {
+  const file = getFile(req.params.id);
+  const path = thumbPath(file.id, Number(req.params.n));
+  if (!Number.isInteger(Number(req.params.n)) || !existsSync(path)) throw new HttpError(404, 'Náhled nenalezen');
+  res.sendFile(path, { maxAge: '7d' }, err => { if (err && !res.headersSent) next(err); });
 });
 
 // --- Projekty ---

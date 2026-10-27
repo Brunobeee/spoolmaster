@@ -51,6 +51,7 @@
     <section id="tab-prints" class="tab-panel" hidden>
       <div class="toolbar">
         <input type="search" id="print-search" placeholder="Hledat tisk…">
+        <button class="btn" id="import-3mf" title="Projekt z Bambu Studia (.3mf), jde i přetáhnout do okna">Importovat 3MF</button>
       </div>
       <div class="print-list" id="print-list"></div>
     </section>
@@ -155,7 +156,11 @@
   <!-- Tisk -->
   <dialog id="print-dialog">
     <form method="dialog" id="print-form">
-      <h2 data-title>Nový tisk</h2>
+      <div class="dialog-head">
+        <h2 data-title>Nový tisk</h2>
+        <button type="button" class="link-btn" id="print-import" data-new-only>nebo importovat 3MF</button>
+      </div>
+      <div class="print-file" id="print-file" hidden></div>
       <div class="segmented" role="radiogroup" aria-label="Stav tisku">
         <label><input type="radio" name="status" value="planned"> Naplánováno</label>
         <label><input type="radio" name="status" value="ok" checked> Povedený</label>
@@ -184,12 +189,45 @@
       <label>Poznámka <textarea name="notes" rows="2" placeholder="Nastavení, tryska, co se pokazilo…"></textarea></label>
       <div class="dialog-actions">
         <button type="button" class="btn ghost danger" data-action="delete" data-edit-only>Smazat</button>
+        <button type="button" class="btn" data-action="reprint" hidden>Vytisknout znovu</button>
         <span class="spacer"></span>
         <button type="button" class="btn" data-close>Zrušit</button>
         <button value="save" class="btn primary">Uložit a odečíst</button>
       </div>
     </form>
   </dialog>
+
+  <!-- Import 3MF -->
+  <dialog id="import-dialog">
+    <form method="dialog" id="import-form">
+      <div class="dialog-head">
+        <h2>Import 3MF</h2>
+        <span class="hint" id="import-info"></span>
+      </div>
+      <div class="import-progress" id="import-progress" hidden>
+        <progress max="100"></progress>
+        <span class="hint num" data-progress-text></span>
+      </div>
+      <div class="import-body" id="import-body" hidden>
+        <p class="notice" id="import-unsliced" hidden>Projekt není uložený po slicování – gramy doplň ručně (příště stačí v Bambu Studiu po slicování uložit projekt).</p>
+        <section>
+          <h3 class="subhead">Podložky</h3>
+          <div class="plate-list" id="import-plates"></div>
+        </section>
+        <label>Projekt <select name="project" id="import-project"></select></label>
+        <fieldset>
+          <legend>Filamenty → cívky</legend>
+          <div class="fil-list" id="import-filaments"></div>
+        </fieldset>
+      </div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="save" class="btn primary" id="import-submit" disabled>Naplánovat</button>
+      </div>
+    </form>
+  </dialog>
+  <input type="file" id="import-file" accept=".3mf" hidden>
 
   <!-- Selhalo -->
   <dialog id="fail-dialog">

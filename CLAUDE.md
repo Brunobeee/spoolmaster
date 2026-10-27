@@ -21,6 +21,8 @@ zůstatku převážením cívky.
 - `prints` (`status` planned/ok/failed, `percent`, `duration_min`, `project_id`) + `print_usages`
 - `projects` – skupiny tisků (active/done)
 - `adjustments` – ruční korekce (převážení); `settings` – key/value nastavení
+- `files` – nahrané 3MF (sha256 unikátní, `meta` = JSON rozboru); tisk má `file_id` + `plate_index`.
+  Soubory na disku vedle DB: `files/<id>.3mf` a náhledy `files/<id>-<podložka>.png` (`FILES_DIR` v db.js).
 - Zůstatek se **neukládá**, počítá se v `SPOOL_SELECT`: initial − Σ usages (bez planned) + Σ adjustments;
   `reserved` = Σ usages naplánovaných tisků. Smazání/úprava tisku tak gramy automaticky vrátí.
   Při mazání proběhlého tisku se UI ptá: vrátit filament (chybný záznam), nebo ponechat odečtený
@@ -81,5 +83,14 @@ zůstatku převážením cívky.
 ## Fáze
 1. ✅ Docker + GitHub Actions + nasazení na NAS, verzované migrace, Nastavení
 2. ✅ Projekty, fronta naplánovaných tisků, cena (filament + elektřina), rezervace
-3. Import 3MF (podložky, gramáž, čas, náhledy), párování s cívkami, „vytisknout znovu“
+3. ✅ Import 3MF (podložky, gramáž, čas, náhledy), párování s cívkami, „vytisknout znovu“
 4. PWA (manifest + ikona, bez offline) a doladění mobilu
+
+## Import 3MF (`threemf.js`, `POST /api/files`, `POST /api/prints/import`)
+- Rozbaluje se jen `Metadata/*.config` a náhledy podložek (projekty mají i 380MB model uvnitř).
+- Podložky z `model_settings.config` (`plater_id`, `plater_name`, objekty → `extruder` = 1-based filament),
+  filamenty projektu z `project_settings.config` (paralelní pole), gramy/čas ze `slice_info.config`
+  (`<plate>` → `prediction` s, `<filament id used_g>`), jen když je projekt uložený po slicování.
+  Uživatel projekty obvykle ukládá bez slicování → import předvyplní podložky a filamenty, gramy ručně.
+- Párování filament → cívka a rozdělení přes stejné cívky na klientu (`suggestSpool`, `allocate`).
+- Uploadnuté soubory se zatím nemažou.

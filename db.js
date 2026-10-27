@@ -4,8 +4,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.SPOOLMASTER_DB || join(root, 'data', 'spoolmaster.db');
-mkdirSync(dirname(dbPath), { recursive: true });
+export const dbPath = process.env.SPOOLMASTER_DB || join(root, 'data', 'spoolmaster.db');
+// Nahrané 3MF (<id>.3mf) a náhledy podložek (<id>-<plate>.png) leží vedle databáze, ve stejném volume.
+export const FILES_DIR = join(dirname(dbPath), 'files');
+mkdirSync(FILES_DIR, { recursive: true });
 
 export const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
@@ -111,6 +113,19 @@ const MIGRATIONS = [
     fetched_at   TEXT NOT NULL
   );
   `,
+  // Nahrané 3MF; meta = JSON z parse3mf (podložky, filamenty). Tisk odkazuje na soubor a podložku.
+  `
+  CREATE TABLE files (
+    id          INTEGER PRIMARY KEY,
+    filename    TEXT NOT NULL,
+    sha256      TEXT NOT NULL UNIQUE,
+    size        INTEGER NOT NULL,
+    meta        TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  ALTER TABLE prints ADD COLUMN file_id INTEGER REFERENCES files(id) ON DELETE SET NULL;
+  ALTER TABLE prints ADD COLUMN plate_index INTEGER;
+  `,
 ];
 
 // Cizí klíče se vypínají před transakcí (uvnitř je pragma bez účinku), aby šly přestavět
@@ -158,13 +173,18 @@ export const PRICE_PER_G = `CASE WHEN s.price IS NULL OR s.initial_weight <= 0 T
 
 // Tisk s gramáží a cenou v USD. Cena filamentu je NULL, když některá cívka nemá cenu;
 // elektřina (cena kWh je v Kč) NULL bez duration_min. Parametry viz costParams().
+// thumb_url jen když soubor má náhled té podložky (has_thumb v meta).
 export const PRINT_SELECT = `
-  SELECT p.*, pj.name AS project_name,
+  SELECT p.*, pj.name AS project_name, f.filename AS file_name,
+    CASE WHEN EXISTS (SELECT 1 FROM json_each(f.meta, '$.plates') j
+                      WHERE j.value ->> 'index' = p.plate_index AND j.value ->> 'has_thumb')
+      THEN '/api/files/' || f.id || '/plates/' || p.plate_index || '.png' END AS thumb_url,
     COALESCE(c.grams, 0) AS grams,
     CASE WHEN c.unknown > 0 THEN NULL ELSE COALESCE(c.cost, 0) END AS filament_cost,
     p.duration_min / 60.0 * $printer_watts / 1000.0 * $kwh_price / $rate_usd * p.percent / 100.0 AS energy_cost
   FROM prints p
   LEFT JOIN projects pj ON pj.id = p.project_id
+  LEFT JOIN files f ON f.id = p.file_id
   LEFT JOIN (
     SELECT u.print_id, SUM(u.grams) AS grams, SUM(u.grams * ${PRICE_PER_G}) AS cost,
       SUM(${PRICE_PER_G} IS NULL) AS unknown

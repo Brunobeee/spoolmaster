@@ -28,7 +28,8 @@ a publikuje se jako `ghcr.io/brunobeee/spoolmaster` (amd64 i arm64).
    a vlož obsah [`docker-compose.yml`](../docker-compose.yml).
 3. Spusť projekt. Aplikace poběží na `http://<IP-NASu>:3420`.
 
-Data (databáze, později i 3MF soubory) jsou ve složce `data/` uvnitř projektové složky.
+Data (databáze, nahrané 3MF soubory a jejich náhledy v `data/files/`) jsou ve složce `data/`
+uvnitř projektové složky.
 Tu zahrň do zálohy NASu. Rychlou ruční zálohu stáhneš v aplikaci přes **Nastavení → Exportovat databázi**.
 
 ### Aktualizace
