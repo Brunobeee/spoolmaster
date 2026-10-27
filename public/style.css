@@ -308,3 +308,17 @@ legend { color: var(--muted); font-size: .88rem; padding: 0 4px; }
 .price-input { display: grid; grid-template-columns: 1fr auto; }
 .price-input input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .price-input select { width: auto; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; color: var(--text); }
+
+/* Skupiny stejných cívek */
+.tag.count { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.spool.group { box-shadow: 4px 4px 0 -1px var(--surface), 4px 4px 0 0 var(--border); }
+.reel.small { width: 36px; height: 36px; }
+.reel.small::after { inset: 11px; }
+.group-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; max-height: 320px; overflow: auto; }
+.group-row {
+  display: grid; grid-template-columns: 36px auto 1fr; gap: 12px; align-items: center; width: 100%;
+  background: var(--surface-2); border: 1px solid transparent; border-radius: 10px; padding: 8px 10px;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.group-row:hover { border-color: var(--border); }
+.group-tags { justify-self: end; display: flex; gap: 6px; align-items: center; }

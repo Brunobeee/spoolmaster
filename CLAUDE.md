@@ -62,6 +62,14 @@ zůstatku převážením cívky.
   psaní mění na tečku a server (`toNum`) čárku přijme také.
 - Nastavení: Kč/kWh, příkon tiskárny, hranice „dochází“, výchozí hmotnost prázdné cívky, export DB.
 
+**Stejné cívky**
+- Každá fyzická cívka je vlastní záznam (vlastní zůstatek), žádný „profil filamentu“ v DB.
+- Inventář slučuje stejné cívky (značka + materiál + název barvy + průměr + hmotnost, `groupKey`)
+  do jedné karty „×N“ s celkovým zůstatkem; detail skupiny vypíše jednotlivé cívky
+  (načatá / neotevřená = bez spotřeby i korekcí). Načaté se řadí a nabízejí první.
+- „+ Přidat stejnou“ (detail cívky i skupiny) = `POST /api/spools/:id/duplicate` s počtem kusů
+  a volitelně jinou cenou; nové cívky jsou plné.
+
 ## Fáze
 1. ✅ Docker + GitHub Actions + nasazení na NAS, verzované migrace, Nastavení
 2. ✅ Projekty, fronta naplánovaných tisků, cena (filament + elektřina), rezervace

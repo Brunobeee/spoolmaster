@@ -25,6 +25,9 @@ filamentu tento měsíc prošlo tiskárnou.
 
 - 🎨 **Inventář cívek**: značka, materiál, barva, umístění, cena. Kruh u každé cívky ukazuje,
   kolik filamentu zbývá.
+- 📦 **Stejné cívky pohromadě**: tři stejné cívky jsou v inventáři jedna karta „×3“ s celkovým
+  zůstatkem. Hned vidíš, kterou dotiskáváš a kolik máš neotevřených. Další kusy přidáš jedním
+  tlačítkem **+ Přidat stejnou**.
 - ➖ **Odečet podle tisků**: zadáš gramy ze sliceru a odečtou se z cívky. Vícebarevný tisk z AMS
   bere z více cívek najednou.
 - ⚖️ **Převážení**: položíš cívku na váhu, odečte se hmotnost prázdné cívky a zůstatek se opraví.

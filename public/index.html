@@ -88,6 +88,29 @@
     <div class="detail" id="detail-body"></div>
   </dialog>
 
+  <!-- Skupina stejných cívek -->
+  <dialog id="group-dialog">
+    <div class="detail" id="group-body"></div>
+  </dialog>
+
+  <!-- Přidat stejnou cívku -->
+  <dialog id="dup-dialog">
+    <form method="dialog" id="dup-form">
+      <h2>Přidat stejnou cívku</h2>
+      <p class="hint" data-dup-label></p>
+      <div class="grid-2">
+        <label>Počet kusů <input name="count" type="text" inputmode="numeric" pattern="\d*" required></label>
+        <label>Cena za kus <span class="price-input"><input name="price" type="text" inputmode="decimal" pattern="\d*[.,]?\d*"><select name="currency" aria-label="Měna"><option value="USD">$ USD</option><option value="EUR">€ EUR</option><option value="CZK">Kč</option></select></span></label>
+      </div>
+      <p class="hint">Nové cívky budou plné, ostatní údaje se zkopírují.</p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="save" class="btn primary">Přidat</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Převážení -->
   <dialog id="adjust-dialog">
     <form method="dialog" id="adjust-form">

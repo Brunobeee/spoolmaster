@@ -1,7 +1,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { spools: [], allSpools: [], prints: [], planned: [], projects: [], settings: {}, rates: {}, tab: 'inventory' };
+const state = { spools: [], allSpools: [], prints: [], planned: [], projects: [], settings: {}, rates: {}, groups: [], tab: 'inventory' };
 
 // --- Pomocné ---
 
@@ -262,6 +262,51 @@ function fillFilters() {
 const reservedLine = s => (s.reserved ?? 0) > 0
   ? `z toho ${fmtG(s.reserved)} naplánováno${s.reserved > s.remaining ? ' <span class="tag warn">nestačí</span>' : ''}` : '';
 
+// Stejné cívky (značka, materiál, barva, průměr, hmotnost) se v inventáři slučují do skupiny;
+// každá fyzická cívka ale zůstává samostatná, protože má vlastní zůstatek.
+const groupKey = s => [s.brand, s.material, s.color_name, s.diameter, s.initial_weight]
+  .map(v => String(v ?? '').trim().toLowerCase()).join('|');
+const isOpened = s => s.used > 0 || s.adjusted !== 0;
+// Napřed načaté od nejmenšího zůstatku (ta se právě dotiskává), pak neotevřené.
+const sortGroup = list => [...list].sort((a, b) =>
+  isOpened(b) - isOpened(a) || a.remaining - b.remaining || a.id - b.id);
+
+function spoolCard(s) {
+  const low = s.remaining < state.settings.low_threshold;
+  const empty = s.remaining <= 0;
+  const reserved = reservedLine(s);
+  return `
+      <button class="spool${low ? ' low' : ''}${empty ? ' empty' : ''}" data-spool="${s.id}" style="--spool:${esc(s.color_hex)}">
+        <div class="reel" style="--p:${pct(s)}"></div>
+        <div class="meta">
+          <div class="title">${esc(s.color_name || 'Bez názvu')}</div>
+          <div class="sub"><span class="tag">${esc(s.material)}</span> ${esc(s.brand)}${s.location ? ' · ' + esc(s.location) : ''}</div>
+          <div class="weight num">${fmtG(s.remaining)} <small>z ${fmtG(s.initial_weight)}</small>
+            ${empty ? '<span class="tag warn">prázdná</span>' : low ? '<span class="tag warn">dochází</span>' : ''}</div>
+          ${reserved ? `<div class="reserved num">${reserved}</div>` : ''}
+        </div>
+      </button>`;
+}
+
+function groupCard(list, index) {
+  const [active] = list;
+  const total = list.reduce((a, s) => a + Math.max(s.remaining, 0), 0);
+  const reservedSum = list.reduce((a, s) => a + (s.reserved || 0), 0);
+  const unopened = list.filter(s => !isOpened(s)).length;
+  const low = total < state.settings.low_threshold;
+  return `
+      <button class="spool group${low ? ' low' : ''}" data-group="${index}" style="--spool:${esc(active.color_hex)}">
+        <div class="reel" style="--p:${pct(active)}"></div>
+        <div class="meta">
+          <div class="title">${esc(active.color_name || 'Bez názvu')} <span class="tag count">×${list.length}</span></div>
+          <div class="sub"><span class="tag">${esc(active.material)}</span> ${esc(active.brand)}</div>
+          <div class="weight num">${fmtG(total)} <small>celkem${unopened ? ` · ${unopened} ${plural(unopened, 'neotevřená', 'neotevřené', 'neotevřených')}` : ''}</small>
+            ${low ? '<span class="tag warn">dochází</span>' : ''}</div>
+          ${reservedSum > 0 ? `<div class="reserved num">z toho ${fmtG(reservedSum)} naplánováno</div>` : ''}
+        </div>
+      </button>`;
+}
+
 function renderSpools() {
   const q = $('#spool-search').value.trim().toLowerCase();
   const mat = $('#spool-material').value;
@@ -278,22 +323,8 @@ function renderSpools() {
   }
   if (!list.length) { grid.innerHTML = '<div class="empty-state">Nic neodpovídá filtru.</div>'; return; }
 
-  grid.innerHTML = list.map(s => {
-    const low = s.remaining < state.settings.low_threshold;
-    const empty = s.remaining <= 0;
-    const reserved = reservedLine(s);
-    return `
-      <button class="spool${low ? ' low' : ''}${empty ? ' empty' : ''}" data-spool="${s.id}" style="--spool:${esc(s.color_hex)}">
-        <div class="reel" style="--p:${pct(s)}"></div>
-        <div class="meta">
-          <div class="title">${esc(s.color_name || 'Bez názvu')}</div>
-          <div class="sub"><span class="tag">${esc(s.material)}</span> ${esc(s.brand)}${s.location ? ' · ' + esc(s.location) : ''}</div>
-          <div class="weight num">${fmtG(s.remaining)} <small>z ${fmtG(s.initial_weight)}</small>
-            ${empty ? '<span class="tag warn">prázdná</span>' : low ? '<span class="tag warn">dochází</span>' : ''}</div>
-          ${reserved ? `<div class="reserved num">${reserved}</div>` : ''}
-        </div>
-      </button>`;
-  }).join('');
+  state.groups = [...Map.groupBy(list, groupKey).values()].map(sortGroup);
+  grid.innerHTML = state.groups.map((g, i) => g.length === 1 ? spoolCard(g[0]) : groupCard(g, i)).join('');
 }
 
 $('#spool-search').addEventListener('input', renderSpools);
@@ -302,8 +333,78 @@ $('#show-archived').addEventListener('change', loadSpools);
 $('#new-spool').addEventListener('click', () => openSpoolForm());
 $('#spool-grid').addEventListener('click', e => {
   if (e.target.closest('[data-new-spool]')) return openSpoolForm();
+  const group = e.target.closest('[data-group]');
+  if (group) return openGroup(state.groups[Number(group.dataset.group)]);
   const card = e.target.closest('[data-spool]');
   if (card) openDetail(Number(card.dataset.spool));
+});
+
+// --- Skupina stejných cívek ---
+
+const groupDialog = $('#group-dialog');
+let openedGroup = null;
+
+function openGroup(list) {
+  openedGroup = list;
+  const [first] = list;
+  const total = list.reduce((a, s) => a + Math.max(s.remaining, 0), 0);
+  $('#group-body').innerHTML = `
+    <div class="detail-head" style="--spool:${esc(first.color_hex)}">
+      <div class="reel big" style="--p:${pct(first)}"></div>
+      <div>
+        <h2>${esc(first.color_name || 'Bez názvu')} <span class="tag count">×${list.length}</span></h2>
+        <div class="hint"><span class="tag">${esc(first.material)}</span> ${esc(first.brand)} · ${first.diameter} mm</div>
+        <div class="big-num num">${fmtG(total)} <span class="hint">celkem</span></div>
+      </div>
+    </div>
+    <div class="group-list">${list.map(s => {
+      const tags = s.remaining <= 0 ? '<span class="tag warn">prázdná</span>'
+        : !isOpened(s) ? '<span class="tag">neotevřená</span>'
+        : s.remaining < state.settings.low_threshold ? '<span class="tag warn">dochází</span>' : '<span class="tag">načatá</span>';
+      return `
+      <button class="group-row" data-spool="${s.id}" style="--spool:${esc(s.color_hex)}">
+        <div class="reel small" style="--p:${pct(s)}"></div>
+        <div class="num"><b>${fmtG(s.remaining)}</b> <span class="hint">z ${fmtG(s.initial_weight)}</span></div>
+        <div class="group-tags">${tags}${s.location ? ` <span class="hint">${esc(s.location)}</span>` : ''}</div>
+      </button>`;
+    }).join('')}</div>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button class="btn ghost" data-close>Zavřít</button>
+      <button class="btn primary" data-act="duplicate">+ Přidat stejnou</button>
+    </div>`;
+  groupDialog.showModal();
+}
+
+groupDialog.addEventListener('click', e => {
+  const row = e.target.closest('[data-spool]');
+  if (row) { groupDialog.close(); return openDetail(Number(row.dataset.spool)); }
+  if (e.target.closest('[data-act="duplicate"]')) { groupDialog.close(); openDuplicate(openedGroup[0]); }
+});
+
+// --- Přidat stejnou cívku ---
+
+const dupDialog = $('#dup-dialog');
+const dupForm = $('#dup-form');
+let dupSource = null;
+
+function openDuplicate(spool) {
+  dupSource = spool;
+  dupForm.reset();
+  $('[data-dup-label]', dupDialog).textContent = spoolLabel(spool);
+  dupForm.elements.count.value = 1;
+  dupForm.elements.price.value = spool.price ?? '';
+  dupForm.elements.currency.value = spool.currency ?? 'USD';
+  dupDialog.showModal();
+}
+
+dupDialog.addEventListener('close', async () => {
+  if (dupDialog.returnValue !== 'save') return;
+  try {
+    const created = await api(`/spools/${dupSource.id}/duplicate`, { method: 'POST', body: Object.fromEntries(new FormData(dupForm)) });
+    toast(`Přidáno: ${created.length} ${plural(created.length, 'cívka', 'cívky', 'cívek')}`);
+    await refresh();
+  } catch (err) { toast(err.message, true); dupDialog.showModal(); }
 });
 
 // --- Formulář cívky ---
@@ -406,6 +507,7 @@ async function openDetail(id) {
     <div class="dialog-actions">
       <button class="btn" data-act="edit">Upravit</button>
       <button class="btn" data-act="adjust">Převážit</button>
+      <button class="btn" data-act="duplicate">+ Přidat stejnou</button>
       <span class="spacer"></span>
       <button class="btn ghost" data-act="close">Zavřít</button>
       <button class="btn primary" data-act="print">+ Tisk z této cívky</button>
@@ -419,6 +521,7 @@ detailDialog.addEventListener('click', e => {
   detailDialog.close();
   if (act === 'edit') openSpoolForm(detailSpool);
   if (act === 'adjust') openAdjust(detailSpool);
+  if (act === 'duplicate') openDuplicate(detailSpool);
   if (act === 'print') openPrintForm(null, { spoolId: detailSpool.id });
 });
 
@@ -660,13 +763,17 @@ let printReturnProject = null; // po zavření formuláře se vrátit do detailu
 
 function spoolOptions(selectedId) {
   // V editaci tisku musí být k dispozici i cívka, která mezitím šla do archivu.
-  const list = [...state.allSpools];
+  // Stejné cívky pohromadě, načatá první, aby se dotiskávala dřív než nová.
+  const groups = [...Map.groupBy(state.allSpools, groupKey).values()];
+  const list = groups.flatMap(g => sortGroup(g).map(s => ({ ...s, inGroup: g.length > 1 })));
   if (selectedId && !list.some(s => s.id === selectedId)) {
     const u = editingPrint?.usages.find(u => u.spool_id === selectedId);
     if (u) list.push({ id: selectedId, ...u, remaining: NaN });
   }
+  const label = s => esc(spoolLabel(s))
+    + (Number.isFinite(s.remaining) ? ` (${fmtG(s.remaining)}${s.inGroup ? (isOpened(s) ? ', načatá' : ', neotevřená') : ''})` : '');
   return '<option value="">— vyberte cívku —</option>' + list.map(s =>
-    `<option value="${s.id}"${s.id === selectedId ? ' selected' : ''}>${esc(spoolLabel(s))}${Number.isFinite(s.remaining) ? ` (${fmtG(s.remaining)})` : ''}</option>`).join('');
+    `<option value="${s.id}"${s.id === selectedId ? ' selected' : ''}>${label(s)}</option>`).join('');
 }
 
 function projectOptions(selectedId) {

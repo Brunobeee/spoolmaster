@@ -124,6 +124,21 @@ app.post('/api/spools', (req, res) => {
   res.status(201).json(getSpool(lastInsertRowid));
 });
 
+// „Přidat stejnou“: nové plné cívky se stejnými údaji, volitelně s jinou cenou.
+app.post('/api/spools/:id/duplicate', (req, res) => {
+  const src = getSpool(req.params.id);
+  const count = toNum(req.body.count ?? 1);
+  if (!Number.isInteger(count) || count < 1 || count > 50) throw new HttpError(400, 'Počet musí být 1–50');
+  const override = pickSpool(Object.fromEntries(['price', 'currency']
+    .filter(f => req.body[f] !== undefined).map(f => [f, req.body[f]])));
+  const copy = ['brand', 'material', 'color_name', 'color_hex', 'diameter', 'initial_weight',
+    'spool_weight', 'price', 'currency', 'location'];
+  const data = Object.fromEntries(copy.map(f => [f, f in override ? override[f] : src[f]]));
+  const stmt = db.prepare(`INSERT INTO spools (${copy.join(',')}) VALUES (${copy.map(() => '?').join(',')})`);
+  const ids = tx(() => Array.from({ length: count }, () => stmt.run(...Object.values(data)).lastInsertRowid));
+  res.status(201).json(ids.map(getSpool));
+});
+
 app.put('/api/spools/:id', (req, res) => {
   getSpool(req.params.id);
   const data = pickSpool(req.body);
