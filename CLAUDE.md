@@ -70,6 +70,9 @@ zůstatku převážením cívky.
 - Formulář tisku: když se gramáž na vybranou cívku nevejde (`availableOn` počítá i rezervace
   a řádky formuláře), zbytek se automaticky rozdělí na další stejné cívky (`autoSplit`, při
   změně pole i při odeslání).
+- Prázdné cívky (zůstatek ≤ 0 a bez rezervace) nejsou v aktivním inventáři ani v přehledu; ukazuje je
+  filtr „Archiv a prázdné“ (`ACTIVE_SPOOL` v server.js). Je to odvozené, ne uložené — smazání tisku
+  cívku vrátí mezi aktivní.
 - „+ Přidat stejnou“ (detail cívky i skupiny) = `POST /api/spools/:id/duplicate` s počtem kusů
   a volitelně jinou cenou; nové cívky jsou plné.
 

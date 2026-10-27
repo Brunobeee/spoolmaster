@@ -98,9 +98,14 @@ function insertUsages(printId, usages) {
 
 // --- Cívky ---
 
+// Aktivní = nearchivovaná a ještě v ní něco je (nebo na ni čeká naplánovaný tisk);
+// remaining je vypočtený sloupec, proto se SPOOL_SELECT filtruje jako poddotaz.
+// Dotištěné cívky se tak samy přesunou do archivu, a když se tisk smaže, samy se vrátí.
+const ACTIVE_SPOOL = 's.archived = 0 AND (s.remaining > 0 OR s.reserved > 0)';
+
 app.get('/api/spools', (req, res) => {
-  const archived = req.query.archived === '1' ? 1 : 0;
-  res.json(db.prepare(`${SPOOL_SELECT} WHERE s.archived = ? ORDER BY s.material, s.brand, s.color_name`).all(archived));
+  const where = req.query.archived === '1' ? `NOT (${ACTIVE_SPOOL})` : ACTIVE_SPOOL;
+  res.json(db.prepare(`SELECT * FROM (${SPOOL_SELECT}) s WHERE ${where} ORDER BY s.material, s.brand, s.color_name`).all());
 });
 
 app.get('/api/spools/:id', (req, res) => {
@@ -391,7 +396,7 @@ app.delete('/api/projects/:id', (req, res) => {
 // --- Přehled ---
 
 app.get('/api/stats', (req, res) => {
-  const spools = db.prepare(`${SPOOL_SELECT} WHERE s.archived = 0`).all();
+  const spools = db.prepare(`SELECT * FROM (${SPOOL_SELECT}) s WHERE ${ACTIVE_SPOOL}`).all();
   const { low_threshold } = getSettings();
   // Cena měsíce sčítá jen známé částky.
   const month = db.prepare(`

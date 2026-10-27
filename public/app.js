@@ -280,9 +280,9 @@ const reservedLine = s => (s.reserved ?? 0) > 0
 const groupKey = s => [s.brand, s.material, s.color_name, s.diameter, s.initial_weight]
   .map(v => String(v ?? '').trim().toLowerCase()).join('|');
 const isOpened = s => s.used > 0 || s.adjusted !== 0;
-// Napřed načaté od nejmenšího zůstatku (ta se právě dotiskává), pak neotevřené.
+// Napřed načaté od nejmenšího zůstatku (ta se právě dotiskává), pak neotevřené, prázdné až na konec.
 const sortGroup = list => [...list].sort((a, b) =>
-  isOpened(b) - isOpened(a) || a.remaining - b.remaining || a.id - b.id);
+  (a.remaining <= 0) - (b.remaining <= 0) || isOpened(b) - isOpened(a) || a.remaining - b.remaining || a.id - b.id);
 
 function spoolCard(s) {
   const low = s.remaining < state.settings.low_threshold;
@@ -306,15 +306,16 @@ function groupCard(list, index) {
   const total = list.reduce((a, s) => a + Math.max(s.remaining, 0), 0);
   const reservedSum = list.reduce((a, s) => a + (s.reserved || 0), 0);
   const unopened = list.filter(s => !isOpened(s)).length;
+  const empty = total <= 0;
   const low = total < state.settings.low_threshold;
   return `
-      <button class="spool group${low ? ' low' : ''}" data-group="${index}" style="--spool:${esc(active.color_hex)}">
+      <button class="spool group${low ? ' low' : ''}${empty ? ' empty' : ''}" data-group="${index}" style="--spool:${esc(active.color_hex)}">
         <div class="reel" style="--p:${pct(active)}"></div>
         <div class="meta">
           <div class="title">${esc(active.color_name || 'Bez názvu')} <span class="tag count">×${list.length}</span></div>
           <div class="sub"><span class="tag">${esc(active.material)}</span> ${esc(active.brand)}</div>
           <div class="weight num">${fmtG(total)} <small>celkem${unopened ? ` · ${unopened} ${plural(unopened, 'neotevřená', 'neotevřené', 'neotevřených')}` : ''}</small>
-            ${low ? '<span class="tag warn">dochází</span>' : ''}</div>
+            ${empty ? '<span class="tag warn">prázdné</span>' : low ? '<span class="tag warn">dochází</span>' : ''}</div>
           ${reservedSum > 0 ? `<div class="reserved num">z toho ${fmtG(reservedSum)} naplánováno</div>` : ''}
         </div>
       </button>`;
@@ -330,7 +331,7 @@ function renderSpools() {
   const grid = $('#spool-grid');
   if (!state.spools.length) {
     grid.innerHTML = $('#show-archived').checked
-      ? '<div class="empty-state">Archiv je prázdný.</div>'
+      ? '<div class="empty-state">Žádné archivované ani dotištěné cívky.</div>'
       : `<div class="empty-state">Zatím tu nejsou žádné cívky.<br><button class="btn primary" data-new-spool>+ Přidat první cívku</button></div>`;
     return;
   }
