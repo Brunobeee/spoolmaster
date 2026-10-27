@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/inventar.jpg" alt="Inventář cívek v SpoolMasteru" width="800">
+  <img src="docs/inventar.png" alt="Inventář cívek v SpoolMasteru" width="800">
 </p>
 
 ---
