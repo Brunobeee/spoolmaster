@@ -338,6 +338,22 @@ fieldset > .btn { align-self: flex-start; }
 }
 .thumb.big { width: 96px; height: 96px; border-radius: 10px; }
 .thumb.empty { display: block; }
+img.thumb { cursor: zoom-in; transition: transform .15s; }
+img.thumb:hover { transform: scale(1.06); }
+
+/* Zvětšený náhled: náhledy z Bambu Studia mají 512 px, víc se nezvětšuje */
+#image-dialog {
+  width: fit-content; height: fit-content; max-width: none; max-height: none; margin: auto;
+  padding: 0; border: 0; background: transparent; box-shadow: none; overflow: visible;
+}
+#image-dialog img {
+  display: block; width: min(512px, 92vw, 80vh); height: auto; aspect-ratio: 1;
+  border-radius: 16px; background: var(--surface); box-shadow: 0 20px 60px rgb(0 0 0 / .4); cursor: zoom-out;
+}
+#image-dialog .image-close {
+  position: absolute; top: 8px; right: 8px; width: 36px; height: 36px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent); color: var(--text);
+}
 .planned-main { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .print.has-thumb { grid-template-columns: auto 1fr auto; }
 .print.has-thumb .thumb { grid-row: span 2; }

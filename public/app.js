@@ -78,6 +78,19 @@ function toast(msg, isError = false) {
   }, 2800);
 }
 
+// Náhled modelu jde rozkliknout. Zachytává se už ve fázi capture, aby klik neotevřel i řádek
+// nebo kartu, ve které náhled je (a v importu nepřepnul zaškrtnutí podložky).
+const imageDialog = $('#image-dialog');
+document.addEventListener('click', e => {
+  const img = e.target.closest?.('img.thumb');
+  if (!img) return;
+  e.preventDefault();
+  e.stopPropagation();
+  $('img', imageDialog).src = img.src;
+  imageDialog.showModal();
+}, true);
+imageDialog.addEventListener('click', () => imageDialog.close());
+
 // Dialog otevřený až po bublině (např. znovu po chybě uložení) by ji jinak překryl.
 new MutationObserver(() => {
   const el = $('#toast');
