@@ -31,6 +31,12 @@ filamentu tento měsíc prošlo tiskárnou.
   Rozdíl se zapíše do historie.
 - ↩️ **Nic se neztratí**: zůstatek se pokaždé dopočítá z historie, takže smazání nebo úprava
   tisku gramy na cívku vrátí.
+- 📋 **Fronta tisků**: tisk naplánuješ dopředu a filament se jen zarezervuje. Po dotisku klepneš
+  **Hotovo**, nebo **Selhalo** a zadáš, kolik procent se vytisklo. Gramy se přepočítají samy.
+- 🗂️ **Projekty**: tisky seskupíš do projektu a vidíš jeho celkovou gramáž a cenu, včetně toho,
+  kolik stály nepovedené pokusy.
+- 💰 **Cena tisku**: filament podle ceny cívky a elektřina podle času tisku. Když cena chybí,
+  aplikace napíše „cena neznámá“, nikdy si nevymyslí 0 Kč.
 - ⚠️ **Upozornění, že dochází**: cívky pod nastavenou hranicí jsou vidět na první pohled.
 - 📊 **Přehled**: kolik máš skladem, kolik dochází a kolik se spotřebovalo tento měsíc.
 - 💾 **Záloha jedním klikem**: export celé databáze ke stažení.
@@ -41,12 +47,12 @@ filamentu tento měsíc prošlo tiskárnou.
 | Fáze | Obsah | Stav |
 | --- | --- | --- |
 | 1 | Docker image pro NAS, migrace databáze, nastavení | ✅ hotovo |
-| 2 | Projekty, fronta naplánovaných tisků, cena tisku (filament + elektřina) | 🔜 další |
-| 3 | Import 3MF z Bambu Studia: gramáž po filamentech, náhled, „vytisknout znovu“ | ⏳ plán |
+| 2 | Projekty, fronta naplánovaných tisků, cena tisku (filament + elektřina) | ✅ hotovo |
+| 3 | Import 3MF z Bambu Studia: gramáž po filamentech, náhled, „vytisknout znovu“ | 🔜 další |
 | 4 | Ikona na plochu mobilu (PWA) a doladění mobilu | ⏳ plán |
 
-Cílový postup: po slicování nahraješ 3MF na počítači a tisk se zařadí do fronty. Po dotisku
-na mobilu klepneš **Hotovo** nebo **Selhalo** a gramy se odečtou ze správných cívek.
+Cílový postup: po slicování nahraješ 3MF na počítači a tisk se sám zařadí do fronty se správnou
+gramáží i časem. Po dotisku na mobilu klepneš **Hotovo** nebo **Selhalo**.
 
 ## Pro koho
 

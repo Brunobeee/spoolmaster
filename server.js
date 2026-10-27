@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, getSettings, saveSettings, SETTINGS_DEFAULTS, SPOOL_SELECT, tx } from './db.js';
+import { costParams, db, getSettings, PRICE_PER_G, PRINT_SELECT, saveSettings, SETTINGS_DEFAULTS, SPOOL_SELECT, tx } from './db.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -40,17 +40,41 @@ function getSpool(id) {
   return spool;
 }
 
-function getPrint(id) {
-  const print = db.prepare('SELECT * FROM prints WHERE id = ?').get(id);
-  if (!print) throw new HttpError(404, 'Tisk nenalezen');
-  print.usages = db.prepare(`
-    SELECT u.id, u.spool_id, u.grams, s.brand, s.material, s.color_name, s.color_hex
+const PRINT_STATUSES = ['planned', 'ok', 'failed'];
+const today = () => new Date().toISOString().slice(0, 10);
+
+// Naplánované podle pořadí zadání, ostatní od nejnovějšího.
+const PRINT_ORDER = `ORDER BY p.status = 'planned' DESC,
+  CASE WHEN p.status = 'planned' THEN p.created_at END, p.printed_at DESC, p.id DESC`;
+
+// Tisky včetně usages; where/params jsou pojmenované ($...).
+function loadPrints(where = '', params = {}) {
+  const prints = db.prepare(`${PRINT_SELECT} ${where ? `WHERE ${where}` : ''} ${PRINT_ORDER}`)
+    .all({ ...costParams(), ...params });
+  if (!prints.length) return [];
+  const ids = prints.map(p => p.id);
+  const usages = db.prepare(`
+    SELECT u.id, u.print_id, u.spool_id, u.grams, s.brand, s.material, s.color_name, s.color_hex,
+      ${PRICE_PER_G} AS price_per_g
     FROM print_usages u JOIN spools s ON s.id = u.spool_id
-    WHERE u.print_id = ?`).all(id);
+    WHERE u.print_id IN (SELECT value FROM json_each(?))
+    ORDER BY u.id`).all(JSON.stringify(ids));
+  const byPrint = Map.groupBy(usages, u => u.print_id);
+  return prints.map(p => ({
+    ...p,
+    usages: (byPrint.get(p.id) ?? []).map(({ print_id, ...u }) => u),
+  }));
+}
+
+function getPrint(id) {
+  const [print] = loadPrints('p.id = $id', { id: Number(id) });
+  if (!print) throw new HttpError(404, 'Tisk nenalezen');
   return print;
 }
 
-function validateUsages(usages) {
+// Prázdný seznam je povolený jen u nepovedeného tisku (selhal hned na začátku).
+function validateUsages(usages, allowEmpty = false) {
+  if (allowEmpty && (usages == null || (Array.isArray(usages) && usages.length === 0))) return [];
   if (!Array.isArray(usages) || usages.length === 0) throw new HttpError(400, 'Tisk musí mít alespoň jednu cívku');
   return usages.map(u => {
     const grams = Number(u.grams);
@@ -76,10 +100,10 @@ app.get('/api/spools', (req, res) => {
 app.get('/api/spools/:id', (req, res) => {
   const spool = getSpool(req.params.id);
   spool.history = db.prepare(`
-    SELECT 'print' AS kind, p.id AS ref_id, p.name AS label, -u.grams AS delta, p.printed_at AS at
+    SELECT 'print' AS kind, p.id AS ref_id, p.name AS label, -u.grams AS delta, p.printed_at AS at, p.status
       FROM print_usages u JOIN prints p ON p.id = u.print_id WHERE u.spool_id = ?
     UNION ALL
-    SELECT 'adjust', a.id, a.reason, a.delta, a.created_at FROM adjustments a WHERE a.spool_id = ?
+    SELECT 'adjust', a.id, a.reason, a.delta, a.created_at, NULL FROM adjustments a WHERE a.spool_id = ?
     ORDER BY at DESC`).all(spool.id, spool.id);
   res.json(spool);
 });
@@ -135,34 +159,72 @@ app.post('/api/spools/:id/adjust', (req, res) => {
 // --- Tisky ---
 
 app.get('/api/prints', (req, res) => {
-  const prints = db.prepare('SELECT * FROM prints ORDER BY printed_at DESC, id DESC').all();
-  const usages = db.prepare(`
-    SELECT u.print_id, u.spool_id, u.grams, s.brand, s.material, s.color_name, s.color_hex
-    FROM print_usages u JOIN spools s ON s.id = u.spool_id`).all();
-  const byPrint = Map.groupBy(usages, u => u.print_id);
-  res.json(prints.map(p => ({ ...p, usages: byPrint.get(p.id) ?? [] })));
+  const where = [];
+  const params = {};
+  if (req.query.status) {
+    if (!PRINT_STATUSES.includes(req.query.status)) throw new HttpError(400, 'Neplatný stav tisku');
+    where.push('p.status = $status');
+    params.status = req.query.status;
+  }
+  if (req.query.project_id) {
+    where.push('p.project_id = $project_id');
+    params.project_id = Number(req.query.project_id);
+  }
+  res.json(loadPrints(where.join(' AND '), params));
 });
 
 app.get('/api/prints/:id', (req, res) => res.json(getPrint(req.params.id)));
 
+function parsePercent(value) {
+  const percent = Number(value);
+  if (value === '' || value == null || !Number.isFinite(percent) || percent < 0 || percent > 100) {
+    throw new HttpError(400, 'Vytištěno % musí být číslo 0–100');
+  }
+  return percent;
+}
+
 function pickPrint(body) {
   const name = String(body.name ?? '').trim();
   if (!name) throw new HttpError(400, 'Zadejte název tisku');
+  const status = body.status || 'ok';
+  if (!PRINT_STATUSES.includes(status)) throw new HttpError(400, 'Neplatný stav tisku');
+
+  // Jen nepovedený tisk může mít méně než 100 %.
+  const percent = status === 'failed' && body.percent !== undefined ? parsePercent(body.percent) : 100;
+
+  let duration_min = null;
+  if (body.duration_min !== '' && body.duration_min != null) {
+    duration_min = Number(body.duration_min);
+    if (!Number.isFinite(duration_min) || duration_min < 0) throw new HttpError(400, 'Neplatný čas tisku');
+  }
+
+  let project_id = null;
+  if (body.project_id !== '' && body.project_id != null) {
+    project_id = Number(body.project_id);
+    if (!db.prepare('SELECT 1 FROM projects WHERE id = ?').get(project_id)) {
+      throw new HttpError(400, `Projekt #${body.project_id} neexistuje`);
+    }
+  }
+
   return {
     name,
-    printed_at: body.printed_at || new Date().toISOString().slice(0, 10),
-    status: body.status === 'failed' ? 'failed' : 'ok',
+    printed_at: body.printed_at || today(),
+    status,
+    percent,
+    duration_min,
+    project_id,
     notes: String(body.notes ?? ''),
   };
 }
 
 app.post('/api/prints', (req, res) => {
   const p = pickPrint(req.body);
-  const usages = validateUsages(req.body.usages);
+  const usages = validateUsages(req.body.usages, p.status === 'failed');
   const id = tx(() => {
-    const { lastInsertRowid } = db.prepare(
-      'INSERT INTO prints (name, printed_at, status, notes) VALUES (?, ?, ?, ?)'
-    ).run(p.name, p.printed_at, p.status, p.notes);
+    const { lastInsertRowid } = db.prepare(`
+      INSERT INTO prints (name, printed_at, status, percent, duration_min, project_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(p.name, p.printed_at, p.status, p.percent, p.duration_min, p.project_id, p.notes);
     insertUsages(lastInsertRowid, usages);
     return lastInsertRowid;
   });
@@ -172,14 +234,43 @@ app.post('/api/prints', (req, res) => {
 app.put('/api/prints/:id', (req, res) => {
   getPrint(req.params.id);
   const p = pickPrint(req.body);
-  const usages = validateUsages(req.body.usages);
+  const usages = validateUsages(req.body.usages, p.status === 'failed');
   tx(() => {
-    db.prepare('UPDATE prints SET name = ?, printed_at = ?, status = ?, notes = ? WHERE id = ?')
-      .run(p.name, p.printed_at, p.status, p.notes, req.params.id);
+    db.prepare(`
+      UPDATE prints SET name = ?, printed_at = ?, status = ?, percent = ?, duration_min = ?,
+        project_id = ?, notes = ? WHERE id = ?`
+    ).run(p.name, p.printed_at, p.status, p.percent, p.duration_min, p.project_id, p.notes, req.params.id);
     db.prepare('DELETE FROM print_usages WHERE print_id = ?').run(req.params.id);
     insertUsages(req.params.id, usages);
   });
   res.json(getPrint(req.params.id));
+});
+
+// Potvrzení naplánovaného tisku. Bez usages se plánované gramy přepočtou podle percent.
+app.post('/api/prints/:id/complete', (req, res) => {
+  const print = getPrint(req.params.id);
+  if (print.status !== 'planned') throw new HttpError(409, 'Tisk už není naplánovaný');
+  const { status } = req.body;
+  if (status !== 'ok' && status !== 'failed') throw new HttpError(400, 'Stav musí být ok nebo failed');
+  if (status === 'failed' && (req.body.percent === undefined || req.body.percent === '')) {
+    throw new HttpError(400, 'U nepovedeného tisku zadejte, kolik % se vytisklo');
+  }
+  const percent = status === 'failed' ? parsePercent(req.body.percent) : 100;
+  const printed_at = req.body.printed_at || today();
+
+  const usages = req.body.usages == null
+    ? print.usages
+        .map(u => ({ spool_id: u.spool_id, grams: Math.round(u.grams * percent / 10) / 10 }))
+        .filter(u => u.grams > 0)
+    : validateUsages(req.body.usages, status === 'failed');
+
+  tx(() => {
+    db.prepare('UPDATE prints SET status = ?, percent = ?, printed_at = ? WHERE id = ?')
+      .run(status, percent, printed_at, print.id);
+    db.prepare('DELETE FROM print_usages WHERE print_id = ?').run(print.id);
+    insertUsages(print.id, usages);
+  });
+  res.json(getPrint(print.id));
 });
 
 app.delete('/api/prints/:id', (req, res) => {
@@ -188,15 +279,107 @@ app.delete('/api/prints/:id', (req, res) => {
   res.status(204).end();
 });
 
+// --- Projekty ---
+
+const PROJECT_STATUSES = ['active', 'done'];
+
+// Souhrny počítají jen ok + failed; planned jen jako planned_count.
+const PROJECT_SELECT = `
+  WITH pc AS (${PRINT_SELECT})
+  SELECT pj.*,
+    COUNT(pc.id) FILTER (WHERE pc.status != 'planned') AS print_count,
+    COUNT(pc.id) FILTER (WHERE pc.status = 'planned') AS planned_count,
+    COALESCE(SUM(pc.grams) FILTER (WHERE pc.status != 'planned'), 0) AS grams,
+    COALESCE(SUM(pc.grams) FILTER (WHERE pc.status = 'failed'), 0) AS failed_grams,
+    CASE WHEN COUNT(pc.id) FILTER (WHERE pc.status != 'planned' AND pc.filament_cost IS NULL) > 0 THEN NULL
+      ELSE COALESCE(SUM(pc.filament_cost) FILTER (WHERE pc.status != 'planned'), 0) END AS filament_cost,
+    SUM(pc.energy_cost) FILTER (WHERE pc.status != 'planned') AS energy_cost,
+    CASE WHEN COUNT(pc.id) FILTER (WHERE pc.status = 'failed' AND pc.filament_cost IS NULL) > 0 THEN NULL
+      ELSE COALESCE(SUM(pc.filament_cost) FILTER (WHERE pc.status = 'failed'), 0)
+         + COALESCE(SUM(pc.energy_cost) FILTER (WHERE pc.status = 'failed'), 0) END AS failed_cost
+  FROM projects pj LEFT JOIN pc ON pc.project_id = pj.id
+`;
+
+function loadProjects(where = '', params = {}) {
+  return db.prepare(`${PROJECT_SELECT} ${where ? `WHERE ${where}` : ''}
+    GROUP BY pj.id ORDER BY pj.status = 'active' DESC, pj.created_at DESC, pj.id DESC`)
+    .all({ ...costParams(), ...params });
+}
+
+function getProject(id) {
+  const [project] = loadProjects('pj.id = $id', { id: Number(id) });
+  if (!project) throw new HttpError(404, 'Projekt nenalezen');
+  return project;
+}
+
+// partial: u PUT se mění jen poslaná pole.
+function pickProject(body, partial = false) {
+  const out = {};
+  if (!partial || 'name' in body) {
+    out.name = String(body.name ?? '').trim();
+    if (!out.name) throw new HttpError(400, 'Zadejte název projektu');
+  }
+  if ('notes' in body) out.notes = String(body.notes ?? '');
+  if ('status' in body) {
+    if (!PROJECT_STATUSES.includes(body.status)) throw new HttpError(400, 'Neplatný stav projektu');
+    out.status = body.status;
+  }
+  return out;
+}
+
+app.get('/api/projects', (req, res) => {
+  const status = req.query.status || 'all';
+  if (status === 'all') return res.json(loadProjects());
+  if (!PROJECT_STATUSES.includes(status)) throw new HttpError(400, 'Neplatný stav projektu');
+  res.json(loadProjects('pj.status = $status', { status }));
+});
+
+app.get('/api/projects/:id', (req, res) => {
+  const project = getProject(req.params.id);
+  project.prints = loadPrints('p.project_id = $id', { id: project.id });
+  res.json(project);
+});
+
+app.post('/api/projects', (req, res) => {
+  const data = pickProject(req.body);
+  const cols = Object.keys(data);
+  const { lastInsertRowid } = db.prepare(
+    `INSERT INTO projects (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`
+  ).run(...Object.values(data));
+  res.status(201).json(getProject(lastInsertRowid));
+});
+
+app.put('/api/projects/:id', (req, res) => {
+  getProject(req.params.id);
+  const data = pickProject(req.body, true);
+  const cols = Object.keys(data);
+  if (cols.length) {
+    db.prepare(`UPDATE projects SET ${cols.map(c => `${c} = ?`).join(',')} WHERE id = ?`)
+      .run(...Object.values(data), req.params.id);
+  }
+  res.json(getProject(req.params.id));
+});
+
+// Tisky zůstanou, project_id se vynuluje (ON DELETE SET NULL).
+app.delete('/api/projects/:id', (req, res) => {
+  getProject(req.params.id);
+  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
 // --- Přehled ---
 
 app.get('/api/stats', (req, res) => {
   const spools = db.prepare(`${SPOOL_SELECT} WHERE s.archived = 0`).all();
   const { low_threshold } = getSettings();
+  // Cena měsíce sčítá jen známé částky.
   const month = db.prepare(`
-    SELECT COALESCE(SUM(u.grams), 0) AS grams, COUNT(DISTINCT p.id) AS prints
-    FROM prints p LEFT JOIN print_usages u ON u.print_id = p.id
-    WHERE p.printed_at >= date('now', 'start of month')`).get();
+    WITH pc AS (${PRINT_SELECT})
+    SELECT COALESCE(SUM(grams), 0) AS grams, COUNT(*) AS prints,
+      COALESCE(SUM(COALESCE(filament_cost, 0) + COALESCE(energy_cost, 0)), 0) AS cost
+    FROM pc WHERE status != 'planned' AND printed_at >= date('now', 'start of month')`).get(costParams());
+  const { plannedCount } = db.prepare(
+    "SELECT COUNT(*) AS plannedCount FROM prints WHERE status = 'planned'").get();
   const byMaterial = Object.entries(Object.groupBy(spools, s => s.material))
     .map(([material, list]) => ({ material, remaining: list.reduce((a, s) => a + Math.max(s.remaining, 0), 0), count: list.length }))
     .sort((a, b) => b.remaining - a.remaining);
@@ -205,6 +388,7 @@ app.get('/api/stats', (req, res) => {
     totalRemaining: spools.reduce((a, s) => a + Math.max(s.remaining, 0), 0),
     lowCount: spools.filter(s => s.remaining < low_threshold).length,
     month,
+    plannedCount,
     byMaterial,
   });
 });

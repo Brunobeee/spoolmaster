@@ -15,11 +15,16 @@ zůstatku převážením cívky.
 - `npm run dev` restartuje server při změně
 
 ## Datový model (`db.js`)
+- Schéma jen přes `MIGRATIONS` (nová migrace na konec, stávající neměnit); během migrací jsou
+  cizí klíče vypnuté kvůli přestavbám tabulek.
 - `spools` – cívky; `initial_weight` = čistá hmotnost filamentu, `spool_weight` = prázdná cívka (tára)
-- `prints` + `print_usages` – tisk a spotřeba z jednotlivých cívek
-- `adjustments` – ruční korekce (převážení)
-- Zůstatek se **neukládá**, počítá se v `SPOOL_SELECT`: initial − Σ usages + Σ adjustments.
-  Smazání/úprava tisku tak gramy automaticky vrátí.
+- `prints` (`status` planned/ok/failed, `percent`, `duration_min`, `project_id`) + `print_usages`
+- `projects` – skupiny tisků (active/done)
+- `adjustments` – ruční korekce (převážení); `settings` – key/value nastavení
+- Zůstatek se **neukládá**, počítá se v `SPOOL_SELECT`: initial − Σ usages (bez planned) + Σ adjustments;
+  `reserved` = Σ usages naplánovaných tisků. Smazání/úprava tisku tak gramy automaticky vrátí.
+- Ceny počítá `PRINT_SELECT` živě z ceny cívky a nastavení: filament NULL, když některá cívka
+  nemá cenu; elektřina = čas × příkon × Kč/kWh × percent.
 
 ## Rozhodnutí (odsouhlaseno 2026-10-27)
 
@@ -53,7 +58,7 @@ zůstatku převážením cívky.
 - Nastavení: Kč/kWh, příkon tiskárny, hranice „dochází“, výchozí hmotnost prázdné cívky, export DB.
 
 ## Fáze
-1. Docker + GitHub Actions + nasazení na NAS, verzované migrace, Nastavení
-2. Projekty, fronta naplánovaných tisků, cena (filament + elektřina), rezervace
+1. ✅ Docker + GitHub Actions + nasazení na NAS, verzované migrace, Nastavení
+2. ✅ Projekty, fronta naplánovaných tisků, cena (filament + elektřina), rezervace
 3. Import 3MF (podložky, gramáž, čas, náhledy), párování s cívkami, „vytisknout znovu“
 4. PWA (manifest + ikona, bez offline) a doladění mobilu

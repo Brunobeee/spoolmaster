@@ -15,6 +15,7 @@
     </div>
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="inventory" aria-selected="true">Inventář</button>
+      <button role="tab" data-tab="projects" aria-selected="false">Projekty</button>
       <button role="tab" data-tab="prints" aria-selected="false">Tisky</button>
     </nav>
     <button class="btn ghost icon" id="open-settings" title="Nastavení" aria-label="Nastavení">
@@ -24,6 +25,8 @@
   </header>
 
   <main>
+    <section class="planned" id="planned" hidden></section>
+
     <section class="stats" id="stats"></section>
 
     <section id="tab-inventory" class="tab-panel">
@@ -34,6 +37,15 @@
         <button class="btn" id="new-spool">+ Přidat cívku</button>
       </div>
       <div class="spool-grid" id="spool-grid"></div>
+    </section>
+
+    <section id="tab-projects" class="tab-panel" hidden>
+      <div class="toolbar">
+        <label class="check"><input type="checkbox" id="show-done"> Zobrazit hotové</label>
+        <span class="spacer"></span>
+        <button class="btn" id="new-project">+ Nový projekt</button>
+      </div>
+      <div class="project-grid" id="project-grid"></div>
     </section>
 
     <section id="tab-prints" class="tab-panel" hidden>
@@ -98,19 +110,31 @@
   <dialog id="print-dialog">
     <form method="dialog" id="print-form">
       <h2 data-title>Nový tisk</h2>
+      <div class="segmented" role="radiogroup" aria-label="Stav tisku">
+        <label><input type="radio" name="status" value="planned"> Naplánováno</label>
+        <label><input type="radio" name="status" value="ok" checked> Povedený</label>
+        <label><input type="radio" name="status" value="failed"> Nepovedený</label>
+      </div>
       <div class="grid-2">
         <label class="span-2">Název <input name="name" required placeholder="Držák na sluchátka"></label>
-        <label>Datum <input name="printed_at" type="date" required></label>
-        <label>Výsledek
-          <select name="status"><option value="ok">Povedený</option><option value="failed">Nepovedený</option></select>
-        </label>
+        <label data-unless="planned">Datum <input name="printed_at" type="date" required></label>
+        <label data-when="failed">Vytištěno % <input name="percent" type="number" min="0" max="100" step="1"></label>
+        <label>Projekt <select name="project_id"></select></label>
+        <div class="field">
+          <span id="duration-label">Čas tisku</span>
+          <div class="duration" role="group" aria-labelledby="duration-label">
+            <div class="unit-input" data-unit="h"><input name="dur_h" type="number" min="0" step="1" placeholder="0" aria-label="Hodiny"></div>
+            <div class="unit-input" data-unit="min"><input name="dur_m" type="number" min="0" max="59" step="1" placeholder="0" aria-label="Minuty"></div>
+          </div>
+        </div>
       </div>
       <fieldset>
-        <legend>Spotřeba filamentu</legend>
+        <legend id="usage-legend">Spotřeba filamentu</legend>
         <div id="usage-rows"></div>
         <button type="button" class="btn ghost small" id="add-usage">+ Další cívka (vícebarevný tisk)</button>
         <p class="usage-total" id="usage-total"></p>
       </fieldset>
+      <p class="estimate" id="print-estimate"></p>
       <label>Poznámka <textarea name="notes" rows="2" placeholder="Nastavení, tryska, co se pokazilo…"></textarea></label>
       <div class="dialog-actions">
         <button type="button" class="btn ghost danger" data-action="delete" data-edit-only>Smazat</button>
@@ -119,6 +143,52 @@
         <button value="save" class="btn primary">Uložit a odečíst</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Selhalo -->
+  <dialog id="fail-dialog">
+    <form method="dialog" id="fail-form">
+      <h2>Tisk selhal</h2>
+      <p class="hint" data-name></p>
+      <div class="field">
+        <span id="fail-percent-label">Vytištěno %</span>
+        <div class="percent-row" role="group" aria-labelledby="fail-percent-label">
+          <input type="range" name="percent_range" min="0" max="100" step="1" value="50" aria-label="Vytištěno procent">
+          <div class="unit-input" data-unit="%"><input name="percent" type="number" min="0" max="100" step="1" value="50" required aria-label="Vytištěno procent"></div>
+        </div>
+      </div>
+      <fieldset>
+        <legend>Skutečná spotřeba</legend>
+        <div id="fail-rows"></div>
+        <p class="usage-total" id="fail-total"></p>
+        <p class="hint">Gramy se přepočítají podle procent. Ručně upravený řádek už posuvník nemění.</p>
+      </fieldset>
+      <label>Datum <input name="printed_at" type="date" required></label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="save" class="btn primary">Uložit jako nepovedený</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Projekt -->
+  <dialog id="project-dialog">
+    <form method="dialog" id="project-form">
+      <h2 data-title>Nový projekt</h2>
+      <label>Název <input name="name" required placeholder="Cosplay helma"></label>
+      <label>Poznámka <textarea name="notes" rows="3" placeholder="Co tisknete, odkaz na model…"></textarea></label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="save" class="btn primary">Uložit</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Detail projektu -->
+  <dialog id="project-detail">
+    <div class="detail" id="project-body"></div>
   </dialog>
 
   <!-- Nastavení -->
@@ -131,7 +201,7 @@
         <label>Cena elektřiny (Kč/kWh) <input name="kwh_price" type="number" step="0.01" min="0" required></label>
         <label>Průměrný příkon tiskárny (W) <input name="printer_watts" type="number" step="1" min="0" required></label>
       </div>
-      <p class="hint">Elektřina se začne započítávat do ceny tisků s odhadem času z 3MF.</p>
+      <p class="hint">Elektřina se počítá z času tisku.</p>
       <fieldset>
         <legend>Záloha</legend>
         <p class="hint">Stáhne kompletní databázi (cívky, tisky, nastavení) jako soubor SQLite.</p>

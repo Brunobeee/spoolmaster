@@ -1,7 +1,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { spools: [], allSpools: [], prints: [], settings: {}, tab: 'inventory' };
+const state = { spools: [], allSpools: [], prints: [], planned: [], projects: [], settings: {}, tab: 'inventory' };
 
 // --- Pomocné ---
 
@@ -24,9 +24,25 @@ const fmtG = g => {
 };
 const fmtDate = d => new Date(d.length <= 10 ? d + 'T00:00' : d.replace(' ', 'T') + 'Z')
   .toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric' });
+const fmtKc = v => `${Math.round(v).toLocaleString('cs-CZ')} Kč`;
+const fmtDur = min => {
+  const t = Math.round(min);
+  const h = Math.floor(t / 60), m = t % 60;
+  return h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`;
+};
+// null = cena některé cívky neznámá; nikdy ji neukazujeme jako 0 Kč
+const costText = (filament, energy) => filament == null ? 'cena neznámá' : fmtKc(filament) + (energy ? ` + ${fmtKc(energy)} el.` : '');
+const plural = (n, one, few, many) => n === 1 ? one : n >= 2 && n <= 4 ? few : many;
+const round1 = v => Math.round(v * 10) / 10;
 const today = () => new Date().toLocaleDateString('sv-SE');
 const spoolLabel = s => [s.brand, s.material, s.color_name].filter(Boolean).join(' · ');
 const pct = s => Math.max(0, Math.min(100, (s.remaining / s.initial_weight) * 100 || 0));
+const printGrams = p => p.grams ?? p.usages.reduce((a, u) => a + u.grams, 0);
+const usageChip = (u, warn = false) => `
+  <span class="chip${warn ? ' warn' : ''}"><span class="dot" style="--c:${esc(u.color_hex)}"></span>${esc(u.color_name || u.material)} <span class="hint">${fmtG(u.grams)}</span></span>`;
+const statusTag = p => p.status === 'planned' ? '<span class="tag">naplánováno</span>'
+  : p.status === 'failed' ? `<span class="tag failed">nepovedený · ${Math.round(p.percent ?? 0)} %</span>` : '';
+const projectTag = p => p.project_name ? `<span class="tag project-tag">${esc(p.project_name)}</span>` : '';
 
 let toastTimer;
 function toast(msg, isError = false) {
@@ -38,13 +54,15 @@ function toast(msg, isError = false) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
 }
 
-// Zavření dialogu kliknutím mimo obsah
 for (const d of $$('dialog')) {
+  // Zavření dialogu kliknutím mimo obsah
   d.addEventListener('click', e => {
     const r = d.getBoundingClientRect();
     const outside = e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
     if (outside || e.target.closest('[data-close]')) d.close('cancel');
   });
+  // Escape nemění returnValue — bez tohohle by po dřívějším uložení Escape uložil znovu.
+  d.addEventListener('cancel', () => { d.returnValue = 'cancel'; });
 }
 
 // --- Načítání dat ---
@@ -62,24 +80,150 @@ async function loadSpools() {
 }
 
 async function loadPrints() {
-  state.prints = await api('/prints');
+  const all = await api('/prints');
+  state.prints = all.filter(p => p.status !== 'planned');
+  state.planned = all.filter(p => p.status === 'planned')
+    .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')) || a.id - b.id);
   renderPrints();
+}
+
+async function loadProjects() {
+  state.projects = await api('/projects?status=all');
+  renderProjects();
 }
 
 async function loadStats() {
   const s = await api('/stats');
+  const m = s.month;
   $('#stats').innerHTML = `
     <div class="stat"><div class="label">Aktivních cívek</div><div class="value num">${s.spoolCount}</div></div>
     <div class="stat"><div class="label">Filamentu skladem</div><div class="value num">${fmtG(s.totalRemaining)}</div></div>
     <div class="stat${s.lowCount ? ' warn' : ''}"><div class="label">Dochází (pod ${state.settings.low_threshold} g)</div><div class="value num">${s.lowCount}</div></div>
-    <div class="stat"><div class="label">Spotřeba tento měsíc · ${s.month.prints} ${s.month.prints === 1 ? 'tisk' : s.month.prints >= 2 && s.month.prints <= 4 ? 'tisky' : 'tisků'}</div><div class="value num">${fmtG(s.month.grams)}</div></div>`;
+    <div class="stat"><div class="label">Spotřeba tento měsíc · ${m.prints} ${plural(m.prints, 'tisk', 'tisky', 'tisků')}</div>
+      <div class="value num">${fmtG(m.grams)}${m.cost > 0 ? ` <small>≈ ${fmtKc(m.cost)}</small>` : ''}</div></div>`;
 }
 
 async function loadSettings() {
   state.settings = await api('/settings');
 }
 
-const refresh = () => Promise.all([loadSpools(), loadPrints(), loadStats()]);
+// Naplánované vykreslujeme až po načtení cívek (varování „nestačí“ potřebuje zůstatky).
+const refresh = async () => {
+  await Promise.all([loadSpools(), loadPrints(), loadStats(), loadProjects()]);
+  renderPlanned();
+};
+
+// --- Naplánováno ---
+
+function renderPlanned() {
+  const el = $('#planned');
+  el.hidden = !state.planned.length;
+  if (!state.planned.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <h2 class="section-title">Naplánováno <span class="tag">${state.planned.length}</span></h2>
+    <div class="planned-list">${state.planned.map(p => {
+      const meta = [
+        p.duration_min != null ? `≈ ${fmtDur(p.duration_min)}` : null,
+        p.filament_cost == null ? 'cena neznámá' : `≈ ${costText(p.filament_cost, p.energy_cost)}`,
+      ].filter(Boolean).join(' · ');
+      const chips = p.usages.map(u => {
+        const s = state.allSpools.find(s => s.id === u.spool_id);
+        return usageChip(u, s && (s.reserved ?? 0) > s.remaining);
+      }).join('');
+      return `
+        <article class="planned-item" data-print="${p.id}">
+          <div class="planned-info">
+            <div><button type="button" class="planned-name">${esc(p.name)}</button> ${projectTag(p)}</div>
+            <div class="chips">${chips}</div>
+            <div class="planned-meta num">${meta}</div>
+          </div>
+          <div class="planned-actions">
+            <button type="button" class="btn ok" data-done>Hotovo</button>
+            <button type="button" class="btn danger" data-fail>Selhalo</button>
+          </div>
+        </article>`;
+    }).join('')}</div>`;
+}
+
+$('#planned').addEventListener('click', async e => {
+  const item = e.target.closest('[data-print]');
+  if (!item) return;
+  const print = state.planned.find(p => p.id === Number(item.dataset.print));
+  if (!print) return;
+  if (e.target.closest('[data-fail]')) return openFail(print);
+  const done = e.target.closest('[data-done]');
+  if (!done) return openPrintForm(print);
+  done.disabled = true;
+  try {
+    const p = await api(`/prints/${print.id}/complete`, { method: 'POST', body: { status: 'ok' } });
+    toast(`Hotovo · odečteno ${fmtG(printGrams(p))}`);
+    await refresh();
+  } catch (err) { toast(err.message, true); done.disabled = false; }
+});
+
+// --- Selhalo ---
+
+const failDialog = $('#fail-dialog');
+const failForm = $('#fail-form');
+let failPrint = null;
+
+function openFail(print) {
+  failPrint = print;
+  failForm.reset();
+  $('[data-name]', failForm).textContent = print.name;
+  failForm.elements.printed_at.value = today();
+  $('#fail-rows').innerHTML = print.usages.map(u => `
+    <div class="fail-row">
+      <span class="chip"><span class="dot" style="--c:${esc(u.color_hex)}"></span>${esc(u.color_name || u.material)}</span>
+      <span class="hint num">z ${fmtG(u.grams)}</span>
+      <div class="unit-input" data-unit="g"><input type="number" step="0.1" min="0" required
+        data-spool="${u.spool_id}" data-planned="${u.grams}" aria-label="Gramy, ${esc(u.color_name || u.material)}"></div>
+    </div>`).join('');
+  setFailPercent(50);
+  failDialog.showModal();
+}
+
+function setFailPercent(value, source) {
+  if (source !== 'range') failForm.elements.percent_range.value = value;
+  if (source !== 'number') failForm.elements.percent.value = value;
+  const p = Math.max(0, Math.min(100, Number(value) || 0));
+  for (const input of $$('#fail-rows input')) {
+    if (!input.dataset.manual) input.value = round1(input.dataset.planned * p / 100);
+  }
+  updateFailTotal();
+}
+
+function updateFailTotal() {
+  const inputs = $$('#fail-rows input');
+  const total = inputs.reduce((a, i) => a + (Number(i.value) || 0), 0);
+  const planned = inputs.reduce((a, i) => a + Number(i.dataset.planned), 0);
+  $('#fail-total').textContent = `Odečte se ${fmtG(total)} z plánovaných ${fmtG(planned)}`;
+}
+
+failForm.addEventListener('input', e => {
+  const t = e.target;
+  if (t.name === 'percent_range') setFailPercent(t.value, 'range');
+  else if (t.name === 'percent') setFailPercent(t.value, 'number');
+  else if (t.dataset.planned) { t.dataset.manual = '1'; updateFailTotal(); }
+});
+
+failDialog.addEventListener('close', async () => {
+  if (failDialog.returnValue !== 'save') return;
+  const body = {
+    status: 'failed',
+    percent: Number(failForm.elements.percent.value),
+    printed_at: failForm.elements.printed_at.value,
+    // Řádky s 0 g vynecháme; prázdný seznam = tisk selhal hned na začátku.
+    usages: $$('#fail-rows input')
+      .map(i => ({ spool_id: Number(i.dataset.spool), grams: round1(Number(i.value) || 0) }))
+      .filter(u => u.grams > 0),
+  };
+  try {
+    const p = await api(`/prints/${failPrint.id}/complete`, { method: 'POST', body });
+    toast(`Zapsáno jako nepovedený · odečteno ${fmtG(printGrams(p))}`);
+    await refresh();
+  } catch (err) { toast(err.message, true); failDialog.showModal(); }
+});
 
 // --- Inventář ---
 
@@ -92,6 +236,9 @@ function fillFilters() {
   const brands = [...new Set(state.allSpools.map(s => s.brand).filter(Boolean))].sort();
   $('#brand-list').innerHTML = brands.map(b => `<option>${esc(b)}</option>`).join('');
 }
+
+const reservedLine = s => (s.reserved ?? 0) > 0
+  ? `z toho ${fmtG(s.reserved)} naplánováno${s.reserved > s.remaining ? ' <span class="tag warn">nestačí</span>' : ''}` : '';
 
 function renderSpools() {
   const q = $('#spool-search').value.trim().toLowerCase();
@@ -112,6 +259,7 @@ function renderSpools() {
   grid.innerHTML = list.map(s => {
     const low = s.remaining < state.settings.low_threshold;
     const empty = s.remaining <= 0;
+    const reserved = reservedLine(s);
     return `
       <button class="spool${low ? ' low' : ''}${empty ? ' empty' : ''}" data-spool="${s.id}" style="--spool:${esc(s.color_hex)}">
         <div class="reel" style="--p:${pct(s)}"></div>
@@ -120,6 +268,7 @@ function renderSpools() {
           <div class="sub"><span class="tag">${esc(s.material)}</span> ${esc(s.brand)}${s.location ? ' · ' + esc(s.location) : ''}</div>
           <div class="weight num">${fmtG(s.remaining)} <small>z ${fmtG(s.initial_weight)}</small>
             ${empty ? '<span class="tag warn">prázdná</span>' : low ? '<span class="tag warn">dochází</span>' : ''}</div>
+          ${reserved ? `<div class="reserved num">${reserved}</div>` : ''}
         </div>
       </button>`;
   }).join('');
@@ -205,6 +354,7 @@ async function openDetail(id) {
     ['Umístění', s.location || '—'],
   ];
   if (s.price != null && s.initial_weight) props[2][1] += ` <small>(${(s.price / s.initial_weight * 1000).toFixed(0)} Kč/kg)</small>`;
+  const reserved = reservedLine(s);
 
   $('#detail-body').innerHTML = `
     <div class="detail-head" style="--spool:${esc(s.color_hex)}">
@@ -213,14 +363,21 @@ async function openDetail(id) {
         <h2>${esc(s.color_name || 'Bez názvu')}</h2>
         <div class="hint"><span class="tag">${esc(s.material)}</span> ${esc(s.brand)}${s.archived ? ' · <span class="tag">archiv</span>' : ''}</div>
         <div class="big-num num">${fmtG(s.remaining)} <span class="hint">z ${fmtG(s.initial_weight)} · ${Math.round(pct(s))} %</span></div>
+        ${reserved ? `<div class="hint num">${reserved}</div>` : ''}
       </div>
     </div>
     <div class="detail-props">${props.map(([k, v]) => `<div><span>${k}</span>${esc(v).replace(/&lt;(\/?)small&gt;/g, '<$1small>')}</div>`).join('')}</div>
     ${s.notes ? `<p class="hint" style="margin-bottom:14px">${esc(s.notes)}</p>` : ''}
     <h3 class="hint" style="margin:0 0 6px">Historie</h3>
-    <ul class="history">${s.history.length ? s.history.map(h => `
-      <li><div>${h.kind === 'print' ? esc(h.label) : `<i>${esc(h.label || 'Korekce')}</i>`}<div class="when">${fmtDate(h.at)}</div></div>
-      <span class="delta num${h.delta > 0 ? ' pos' : ''}">${h.delta > 0 ? '+' : ''}${fmtG(h.delta)}</span></li>`).join('')
+    <ul class="history">${s.history.length ? s.history.map(h => {
+      const planned = h.kind === 'print' && h.status === 'planned';
+      const label = h.kind !== 'print' ? `<i>${esc(h.label || 'Korekce')}</i>`
+        : planned ? `<i>${esc(h.label)}</i> <span class="tag">naplánováno</span>`
+        : esc(h.label) + (h.status === 'failed' ? ' <span class="tag failed">nepovedený</span>' : '');
+      return `
+      <li${planned ? ' class="planned"' : ''}><div>${label}<div class="when">${fmtDate(h.at)}</div></div>
+      <span class="delta num${h.delta > 0 ? ' pos' : ''}">${h.delta > 0 ? '+' : ''}${fmtG(h.delta)}</span></li>`;
+    }).join('')
       : '<li class="hint">Zatím žádné tisky.</li>'}</ul>
     <div class="dialog-actions">
       <button class="btn" data-act="edit">Upravit</button>
@@ -238,7 +395,7 @@ detailDialog.addEventListener('click', e => {
   detailDialog.close();
   if (act === 'edit') openSpoolForm(detailSpool);
   if (act === 'adjust') openAdjust(detailSpool);
-  if (act === 'print') openPrintForm(null, detailSpool.id);
+  if (act === 'print') openPrintForm(null, { spoolId: detailSpool.id });
 });
 
 // --- Převážení ---
@@ -270,28 +427,195 @@ adjustDialog.addEventListener('close', async () => {
   } catch (err) { toast(err.message, true); }
 });
 
+// --- Projekty ---
+
+const failedText = p => (p.failed_grams > 0 || p.failed_cost > 0)
+  ? `z toho ${p.failed_cost != null ? fmtKc(p.failed_cost) : fmtG(p.failed_grams)} nepovedené` : '';
+
+function renderProjects() {
+  const showDone = $('#show-done').checked;
+  const list = state.projects.filter(p => showDone || p.status !== 'done');
+  const grid = $('#project-grid');
+  if (!state.projects.length) {
+    grid.innerHTML = `<div class="empty-state">Zatím žádné projekty. Projekt sdruží tisky jedné věci a sečte jejich gramáž a cenu.<br>
+      <button class="btn primary" data-new-project>+ Nový projekt</button></div>`;
+    return;
+  }
+  if (!list.length) { grid.innerHTML = '<div class="empty-state">Všechny projekty jsou hotové. Ukáže je přepínač <b>Zobrazit hotové</b>.</div>'; return; }
+  grid.innerHTML = list.map(p => {
+    const counts = p.print_count || p.planned_count
+      ? [`${p.print_count} ${plural(p.print_count, 'tisk', 'tisky', 'tisků')}`,
+         p.planned_count ? `${p.planned_count} ${plural(p.planned_count, 'naplánovaný', 'naplánované', 'naplánovaných')}` : null]
+        .filter(Boolean).join(' · ')
+      : 'zatím bez tisků';
+    const failed = failedText(p);
+    return `
+      <button class="project${p.status === 'done' ? ' done' : ''}" data-project="${p.id}">
+        <div class="title">${esc(p.name)} ${p.status === 'done' ? '<span class="tag">hotový</span>' : ''}</div>
+        <div class="project-nums num"><span class="weight">${fmtG(p.grams)}</span>${p.print_count ? ` <span class="cost">${costText(p.filament_cost, p.energy_cost)}</span>` : ''}</div>
+        ${failed ? `<div class="failed num">${failed}</div>` : ''}
+        <div class="sub">${counts}</div>
+      </button>`;
+  }).join('');
+}
+
+$('#show-done').addEventListener('change', renderProjects);
+$('#new-project').addEventListener('click', () => openProjectForm());
+$('#project-grid').addEventListener('click', e => {
+  if (e.target.closest('[data-new-project]')) return openProjectForm();
+  const card = e.target.closest('[data-project]');
+  if (card) openProject(Number(card.dataset.project));
+});
+
+// --- Formulář projektu ---
+
+const projectDialog = $('#project-dialog');
+const projectForm = $('#project-form');
+let editingProject = null;
+let projectFormDone = null; // callback pro založení z formuláře tisku: dostane projekt, nebo null při zrušení
+
+function openProjectForm(project = null, onDone = null) {
+  editingProject = project;
+  projectFormDone = onDone;
+  projectForm.reset();
+  $('[data-title]', projectForm).textContent = project ? 'Upravit projekt' : 'Nový projekt';
+  projectForm.elements.name.value = project?.name ?? '';
+  projectForm.elements.notes.value = project?.notes ?? '';
+  projectDialog.showModal();
+}
+
+projectDialog.addEventListener('close', async () => {
+  const done = projectFormDone;
+  if (projectDialog.returnValue !== 'save') {
+    projectFormDone = null;
+    done?.(null);
+    if (editingProject) openProject(editingProject.id);
+    return;
+  }
+  const body = {
+    name: projectForm.elements.name.value,
+    notes: projectForm.elements.notes.value,
+    status: editingProject?.status ?? 'active',
+  };
+  try {
+    const saved = editingProject
+      ? await api(`/projects/${editingProject.id}`, { method: 'PUT', body })
+      : await api('/projects', { method: 'POST', body });
+    projectFormDone = null;
+    toast(editingProject ? 'Projekt upraven' : 'Projekt založen');
+    if (editingProject) {
+      await refresh(); // název projektu je i u tisků
+      openProject(saved.id);
+    } else {
+      await loadProjects();
+    }
+    done?.(saved);
+  } catch (err) { toast(err.message, true); projectDialog.showModal(); }
+});
+
+// --- Detail projektu ---
+
+const projectDetail = $('#project-detail');
+let detailProject = null;
+
+async function openProject(id) {
+  try { detailProject = await api(`/projects/${id}`); }
+  catch (err) { return toast(err.message, true); }
+  const p = detailProject;
+  const prints = [...p.prints].sort((a, b) =>
+    (b.status === 'planned') - (a.status === 'planned') || b.printed_at.localeCompare(a.printed_at) || b.id - a.id);
+  const total = p.filament_cost == null ? 'cena neznámá' : fmtKc(p.filament_cost + (p.energy_cost ?? 0));
+  const props = [
+    ['Gramáž', fmtG(p.grams)],
+    ['Filament', p.filament_cost != null ? fmtKc(p.filament_cost) : 'cena neznámá'],
+    ['Elektřina', p.energy_cost != null ? fmtKc(p.energy_cost) : '—'],
+    ['Tisky', `${p.print_count}${p.planned_count ? ` + ${p.planned_count} naplánováno` : ''}`],
+    ['Nepovedené', p.failed_grams > 0 || p.failed_cost > 0
+      ? `${fmtG(p.failed_grams)} · ${p.failed_cost != null ? fmtKc(p.failed_cost) : 'cena neznámá'}` : '—'],
+    ['Založen', p.created_at ? fmtDate(p.created_at) : '—'],
+  ];
+
+  $('#project-body').innerHTML = `
+    <div class="detail-head">
+      <div>
+        <h2>${esc(p.name)}</h2>
+        <div class="hint">${p.status === 'done' ? '<span class="tag">hotový</span>' : '<span class="tag project-tag">rozpracovaný</span>'}</div>
+        <div class="big-num num">${total} <span class="hint">celkem</span></div>
+      </div>
+    </div>
+    <div class="detail-props">${props.map(([k, v]) => `<div><span>${k}</span>${esc(v)}</div>`).join('')}</div>
+    ${p.notes ? `<p class="hint" style="margin-bottom:14px">${esc(p.notes)}</p>` : ''}
+    <h3 class="hint" style="margin:0 0 6px">Tisky</h3>
+    <ul class="history project-prints">${prints.length ? prints.map(pr => `
+      <li data-print="${pr.id}"${pr.status === 'planned' ? ' class="planned"' : ''}>
+        <div>${esc(pr.name)} ${statusTag(pr)}
+          <div class="when">${pr.status === 'planned' ? 'čeká na tisk' : fmtDate(pr.printed_at)}${pr.duration_min != null ? ` · ${fmtDur(pr.duration_min)}` : ''}</div></div>
+        <div class="right num">${fmtG(printGrams(pr))}<div class="when">${costText(pr.filament_cost, pr.energy_cost)}</div></div>
+      </li>`).join('')
+      : '<li class="hint">Zatím žádné tisky.</li>'}</ul>
+    <div class="dialog-actions">
+      <button class="btn ghost danger" data-act="delete">Smazat</button>
+      <button class="btn" data-act="edit">Upravit</button>
+      <button class="btn" data-act="toggle">${p.status === 'done' ? 'Označit jako rozpracovaný' : 'Označit jako hotový'}</button>
+      <div class="actions-end">
+        <button class="btn ghost" data-act="close" autofocus>Zavřít</button>
+        <button class="btn primary" data-act="print">+ Tisk do projektu</button>
+      </div>
+    </div>`;
+  if (!projectDetail.open) projectDetail.showModal();
+}
+
+projectDetail.addEventListener('click', async e => {
+  const p = detailProject;
+  const row = e.target.closest('[data-print]');
+  if (row) {
+    projectDetail.close();
+    return openPrintForm(p.prints.find(pr => pr.id === Number(row.dataset.print)), { returnTo: p.id });
+  }
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (!act) return;
+  if (act === 'toggle') {
+    const status = p.status === 'done' ? 'active' : 'done';
+    try {
+      await api(`/projects/${p.id}`, { method: 'PUT', body: { name: p.name, notes: p.notes, status } });
+      toast(status === 'done' ? 'Projekt je hotový' : 'Projekt je zase rozpracovaný');
+      await Promise.all([openProject(p.id), loadProjects()]);
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (act === 'delete') {
+    if (!confirm(`Smazat projekt „${p.name}“? Tisky zůstanou, jen nebudou v žádném projektu.`)) return;
+    try {
+      await api(`/projects/${p.id}`, { method: 'DELETE' });
+      projectDetail.close();
+      toast('Projekt smazán');
+      await refresh();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  projectDetail.close();
+  if (act === 'edit') openProjectForm(p);
+  if (act === 'print') openPrintForm(null, { projectId: p.id, returnTo: p.id });
+});
+
 // --- Tisky ---
 
 function renderPrints() {
   const q = $('#print-search').value.trim().toLowerCase();
-  const list = state.prints.filter(p => !q || (p.name + ' ' + p.notes).toLowerCase().includes(q));
+  const list = state.prints.filter(p => !q || [p.name, p.notes, p.project_name].join(' ').toLowerCase().includes(q));
   const el = $('#print-list');
   if (!state.prints.length) {
     el.innerHTML = '<div class="empty-state">Zatím žádné tisky. Po dotisku klikněte na <b>+ Nový tisk</b> a gramáž se odečte z cívky.</div>';
     return;
   }
   if (!list.length) { el.innerHTML = '<div class="empty-state">Nic neodpovídá hledání.</div>'; return; }
-  el.innerHTML = list.map(p => {
-    const total = p.usages.reduce((a, u) => a + u.grams, 0);
-    return `
+  el.innerHTML = list.map(p => `
       <button class="print" data-print="${p.id}">
-        <div><span class="name">${esc(p.name)}</span> ${p.status === 'failed' ? '<span class="tag failed">nepovedený</span>' : ''}
+        <div><span class="name">${esc(p.name)}</span> ${statusTag(p)} ${projectTag(p)}
           <span class="date">· ${fmtDate(p.printed_at)}</span></div>
-        <div class="grams num">${fmtG(total)}</div>
-        <div class="chips">${p.usages.map(u => `
-          <span class="chip"><span class="dot" style="--c:${esc(u.color_hex)}"></span>${esc(u.color_name || u.material)} <span class="hint">${fmtG(u.grams)}</span></span>`).join('')}</div>
-      </button>`;
-  }).join('');
+        <div class="grams num">${fmtG(printGrams(p))}<div class="cost">${costText(p.filament_cost, p.energy_cost)}</div></div>
+        <div class="chips">${p.usages.map(u => usageChip(u)).join('')}</div>
+      </button>`).join('');
 }
 
 $('#print-search').addEventListener('input', renderPrints);
@@ -305,7 +629,9 @@ $('#new-print').addEventListener('click', () => openPrintForm());
 
 const printDialog = $('#print-dialog');
 const printForm = $('#print-form');
+const projectSelect = printForm.elements.project_id;
 let editingPrint = null;
+let printReturnProject = null; // po zavření formuláře se vrátit do detailu projektu
 
 function spoolOptions(selectedId) {
   // V editaci tisku musí být k dispozici i cívka, která mezitím šla do archivu.
@@ -317,6 +643,25 @@ function spoolOptions(selectedId) {
   return '<option value="">— vyberte cívku —</option>' + list.map(s =>
     `<option value="${s.id}"${s.id === selectedId ? ' selected' : ''}>${esc(spoolLabel(s))}${Number.isFinite(s.remaining) ? ` (${fmtG(s.remaining)})` : ''}</option>`).join('');
 }
+
+function projectOptions(selectedId) {
+  // Hotové projekty nenabízíme, kromě toho, ve kterém tisk už je.
+  const list = state.projects.filter(p => p.status !== 'done' || p.id === selectedId);
+  if (selectedId && !list.some(p => p.id === selectedId) && editingPrint?.project_id === selectedId) {
+    list.push({ id: selectedId, name: editingPrint.project_name, status: 'active' });
+  }
+  return '<option value="">— žádný —</option>' + list.map(p =>
+    `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${esc(p.name)}${p.status === 'done' ? ' (hotový)' : ''}</option>`).join('') +
+    '<option value="new">+ Nový projekt…</option>';
+}
+
+projectSelect.addEventListener('change', () => {
+  if (projectSelect.value !== 'new') { projectSelect.dataset.prev = projectSelect.value; return; }
+  openProjectForm(null, created => {
+    projectSelect.innerHTML = projectOptions(created ? created.id : Number(projectSelect.dataset.prev) || null);
+    projectSelect.dataset.prev = projectSelect.value;
+  });
+});
 
 function addUsageRow(spoolId = null, grams = '') {
   const row = document.createElement('div');
@@ -331,8 +676,46 @@ function addUsageRow(spoolId = null, grams = '') {
   return row;
 }
 
+function durationValue() {
+  const t = (Number(printForm.elements.dur_h.value) || 0) * 60 + (Number(printForm.elements.dur_m.value) || 0);
+  return t > 0 ? t : null;
+}
+
+function pricePerG(spoolId) {
+  const s = state.allSpools.find(s => s.id === spoolId);
+  if (s) return s.price != null && s.initial_weight ? s.price / s.initial_weight : null;
+  return editingPrint?.usages.find(u => u.spool_id === spoolId)?.price_per_g ?? null;
+}
+
+function updateEstimate() {
+  const status = printForm.elements.status.value;
+  const percent = status === 'failed' ? Number(printForm.elements.percent.value) || 0 : 100;
+  const minutes = durationValue();
+  const { kwh_price = 0, printer_watts = 0 } = state.settings;
+  const energy = minutes != null ? minutes / 60 * printer_watts / 1000 * kwh_price * percent / 100 : null;
+  let filament = 0, unknown = false, any = false;
+  for (const row of $$('.usage-row', printForm)) {
+    const id = Number($('select', row).value);
+    const grams = Number($('input', row).value) || 0;
+    if (!id || grams <= 0) continue;
+    any = true;
+    const ppg = pricePerG(id);
+    if (ppg == null) unknown = true;
+    else filament += grams * ppg;
+  }
+  const el = $('#print-estimate');
+  el.classList.toggle('unknown', unknown);
+  if (!any) { el.textContent = energy != null ? `≈ ${fmtKc(energy)} elektřina` : ''; return; }
+  const energyText = energy != null ? `${fmtKc(energy)} elektřina` : '';
+  el.textContent = unknown
+    ? `Cena filamentu neznámá${energyText ? ` · ≈ ${energyText}` : ''}`
+    : `≈ ${fmtKc(filament)} filament${energyText ? ` + ${energyText}` : ''}`;
+}
+
 function updateUsageInfo() {
   const rows = $$('.usage-row', printForm);
+  const status = printForm.elements.status.value;
+  const wasPlanned = editingPrint?.status === 'planned';
   let total = 0;
   for (const row of rows) {
     $('.icon-btn', row).hidden = rows.length === 1;
@@ -342,15 +725,32 @@ function updateUsageInfo() {
     const spool = state.allSpools.find(s => s.id === id);
     const after = $('.after', row);
     if (!spool) { after.textContent = ''; continue; }
-    // Při editaci se původní spotřeba tohoto tisku už v zůstatku projevila — vrátíme ji zpět.
+    // Původní spotřeba upravovaného tisku je buď už odečtená (ok/failed), nebo v rezervaci (planned).
     const original = editingPrint?.usages.filter(u => u.spool_id === id).reduce((a, u) => a + u.grams, 0) ?? 0;
     const sameSpoolOther = rows.filter(r => r !== row && Number($('select', r).value) === id)
       .reduce((a, r) => a + (Number($('input', r).value) || 0), 0);
-    const left = spool.remaining + original - grams - sameSpoolOther;
-    after.textContent = `Po tisku zbude ${fmtG(left)}`;
+    let left = spool.remaining + (wasPlanned ? 0 : original) - grams - sameSpoolOther;
+    let note = '';
+    if (status === 'planned') {
+      const otherReserved = Math.max(0, (spool.reserved ?? 0) - (wasPlanned ? original : 0));
+      left -= otherReserved;
+      if (otherReserved > 0) note = ` · počítá s ${fmtG(otherReserved)} pro jiné naplánované tisky`;
+    }
+    after.textContent = `Po tisku zbude ${fmtG(left)}${note}`;
     after.classList.toggle('neg', left < 0);
   }
   $('#usage-total').textContent = rows.length > 1 ? `Celkem ${fmtG(total)}` : '';
+  updateEstimate();
+}
+
+function updatePrintMode() {
+  const status = printForm.elements.status.value;
+  $$('[data-when]', printForm).forEach(el => el.hidden = el.dataset.when !== status);
+  $$('[data-unless]', printForm).forEach(el => el.hidden = el.dataset.unless === status);
+  printForm.elements.percent.required = status === 'failed';
+  $('#usage-legend').textContent = status === 'planned' ? 'Plánovaná spotřeba filamentu' : 'Spotřeba filamentu';
+  $('button[value="save"]', printForm).textContent = editingPrint ? 'Uložit' : status === 'planned' ? 'Naplánovat' : 'Uložit a odečíst';
+  updateUsageInfo();
 }
 
 $('#usage-rows').addEventListener('input', updateUsageInfo);
@@ -358,51 +758,76 @@ $('#usage-rows').addEventListener('click', e => {
   if (e.target.closest('.icon-btn')) { e.target.closest('.usage-row').remove(); updateUsageInfo(); }
 });
 $('#add-usage').addEventListener('click', () => $('select', addUsageRow()).focus());
+printForm.addEventListener('change', e => { if (e.target.name === 'status') updatePrintMode(); });
+printForm.addEventListener('input', e => { if (['dur_h', 'dur_m', 'percent'].includes(e.target.name)) updateEstimate(); });
 
-function openPrintForm(print = null, presetSpoolId = null) {
+function openPrintForm(print = null, { spoolId = null, projectId = null, returnTo = null } = {}) {
   if (!state.allSpools.length) {
     toast('Nejdřív přidejte alespoň jednu cívku', true);
     return openSpoolForm();
   }
   editingPrint = print;
+  printReturnProject = returnTo;
   printForm.reset();
   $('#usage-rows').innerHTML = '';
-  $('[data-title]', printForm).textContent = print ? 'Upravit tisk' : 'Nový tisk';
+  $('[data-title]', printForm).textContent = !print ? 'Nový tisk' : print.status === 'planned' ? 'Upravit naplánovaný tisk' : 'Upravit tisk';
   $$('[data-edit-only]', printForm).forEach(el => el.hidden = !print);
-  $('button[value="save"]', printForm).textContent = print ? 'Uložit' : 'Uložit a odečíst';
   printForm.elements.name.value = print?.name ?? '';
   printForm.elements.printed_at.value = print?.printed_at ?? today();
   printForm.elements.status.value = print?.status ?? 'ok';
+  printForm.elements.percent.value = print?.status === 'failed' ? print.percent : 50;
+  projectSelect.innerHTML = projectOptions(print ? print.project_id : projectId);
+  projectSelect.dataset.prev = projectSelect.value;
+  if (print?.duration_min != null) {
+    const t = Math.round(print.duration_min);
+    printForm.elements.dur_h.value = Math.floor(t / 60) || '';
+    printForm.elements.dur_m.value = t % 60 || '';
+  }
   printForm.elements.notes.value = print?.notes ?? '';
   if (print) print.usages.forEach(u => addUsageRow(u.spool_id, u.grams));
-  else addUsageRow(presetSpoolId ?? (state.allSpools.length === 1 ? state.allSpools[0].id : null));
+  else addUsageRow(spoolId ?? (state.allSpools.length === 1 ? state.allSpools[0].id : null));
+  updatePrintMode();
   printDialog.showModal();
 }
 
 printDialog.addEventListener('close', async () => {
-  if (printDialog.returnValue !== 'save') return;
-  const body = {
-    name: printForm.elements.name.value,
-    printed_at: printForm.elements.printed_at.value,
-    status: printForm.elements.status.value,
-    notes: printForm.elements.notes.value,
-    usages: $$('.usage-row', printForm).map(r => ({ spool_id: $('select', r).value, grams: $('input', r).value })),
-  };
-  try {
-    if (editingPrint) await api(`/prints/${editingPrint.id}`, { method: 'PUT', body });
-    else await api('/prints', { method: 'POST', body });
-    const total = body.usages.reduce((a, u) => a + Number(u.grams), 0);
-    toast(editingPrint ? 'Tisk upraven' : `Odečteno ${fmtG(total)}`);
-    await refresh();
-  } catch (err) { toast(err.message, true); printDialog.showModal(); }
+  if (printDialog.returnValue === 'save') {
+    const status = printForm.elements.status.value;
+    const project = projectSelect.value;
+    const body = {
+      name: printForm.elements.name.value,
+      printed_at: printForm.elements.printed_at.value,
+      status,
+      percent: status === 'failed' ? Number(printForm.elements.percent.value) : 100,
+      duration_min: durationValue(),
+      project_id: project && project !== 'new' ? Number(project) : null,
+      notes: printForm.elements.notes.value,
+      usages: $$('.usage-row', printForm).map(r => ({ spool_id: $('select', r).value, grams: $('input', r).value })),
+    };
+    try {
+      if (editingPrint) await api(`/prints/${editingPrint.id}`, { method: 'PUT', body });
+      else await api('/prints', { method: 'POST', body });
+      const total = body.usages.reduce((a, u) => a + Number(u.grams), 0);
+      toast(editingPrint ? 'Tisk upraven' : status === 'planned' ? 'Tisk naplánován' : `Odečteno ${fmtG(total)}`);
+      await refresh();
+    } catch (err) { toast(err.message, true); printDialog.showModal(); return; }
+  }
+  if (printReturnProject) {
+    const id = printReturnProject;
+    printReturnProject = null;
+    openProject(id);
+  }
 });
 
 $('[data-action="delete"]', printForm).addEventListener('click', async () => {
-  if (!confirm(`Smazat tisk „${editingPrint.name}“? Gramáž se vrátí na cívky.`)) return;
+  const msg = editingPrint.status === 'planned'
+    ? `Smazat naplánovaný tisk „${editingPrint.name}“? Rezervace filamentu se zruší.`
+    : `Smazat tisk „${editingPrint.name}“? Gramáž se vrátí na cívky.`;
+  if (!confirm(msg)) return;
   try {
     await api(`/prints/${editingPrint.id}`, { method: 'DELETE' });
     printDialog.close('done');
-    toast('Tisk smazán, gramáž vrácena');
+    toast(editingPrint.status === 'planned' ? 'Naplánovaný tisk smazán' : 'Tisk smazán, gramáž vrácena');
     await refresh();
   } catch (err) { toast(err.message, true); }
 });
@@ -430,15 +855,16 @@ settingsDialog.addEventListener('close', async () => {
 
 // --- Záložky ---
 
+const TABS = ['inventory', 'projects', 'prints'];
+
 function setTab(tab) {
   state.tab = tab;
   for (const b of $$('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
-  $('#tab-inventory').hidden = tab !== 'inventory';
-  $('#tab-prints').hidden = tab !== 'prints';
+  for (const t of TABS) $(`#tab-${t}`).hidden = t !== tab;
   history.replaceState(null, '', `#${tab}`);
 }
 $('.tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
-const tabFromHash = () => setTab(location.hash === '#prints' ? 'prints' : 'inventory');
+const tabFromHash = () => { const t = location.hash.slice(1); setTab(TABS.includes(t) ? t : 'inventory'); };
 addEventListener('hashchange', tabFromHash);
 tabFromHash();
 
