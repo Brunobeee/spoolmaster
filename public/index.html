@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpoolMaster</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='none' stroke='%23e8743b' stroke-width='6'/><circle cx='16' cy='16' r='3' fill='%23e8743b'/></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="currentColor" stroke-width="5"/><circle cx="16" cy="16" r="3" fill="currentColor"/></svg>
+      SpoolMaster
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="inventory" aria-selected="true">Inventář</button>
+      <button role="tab" data-tab="prints" aria-selected="false">Tisky</button>
+    </nav>
+    <button class="btn primary" id="new-print">+ Nový tisk</button>
+  </header>
+
+  <main>
+    <section class="stats" id="stats"></section>
+
+    <section id="tab-inventory" class="tab-panel">
+      <div class="toolbar">
+        <input type="search" id="spool-search" placeholder="Hledat značku, barvu, umístění…">
+        <select id="spool-material"><option value="">Všechny materiály</option></select>
+        <label class="check"><input type="checkbox" id="show-archived"> Archiv</label>
+        <button class="btn" id="new-spool">+ Přidat cívku</button>
+      </div>
+      <div class="spool-grid" id="spool-grid"></div>
+    </section>
+
+    <section id="tab-prints" class="tab-panel" hidden>
+      <div class="toolbar">
+        <input type="search" id="print-search" placeholder="Hledat tisk…">
+      </div>
+      <div class="print-list" id="print-list"></div>
+    </section>
+  </main>
+
+  <!-- Cívka -->
+  <dialog id="spool-dialog">
+    <form method="dialog" id="spool-form">
+      <h2 data-title>Nová cívka</h2>
+      <div class="grid-2">
+        <label>Značka <input name="brand" placeholder="Prusament" list="brand-list"></label>
+        <label>Materiál <input name="material" required placeholder="PLA" list="material-list"></label>
+        <label>Název barvy <input name="color_name" placeholder="Galaxy Black"></label>
+        <label>Barva <input name="color_hex" type="color" value="#e8743b"></label>
+        <label>Hmotnost filamentu (g) <input name="initial_weight" type="number" step="1" min="0" value="1000" required></label>
+        <label>Prázdná cívka (g) <input name="spool_weight" type="number" step="1" min="0" placeholder="např. 200"></label>
+        <label>Průměr (mm) <select name="diameter"><option>1.75</option><option>2.85</option></select></label>
+        <label>Cena (Kč) <input name="price" type="number" step="1" min="0"></label>
+        <label class="span-2">Umístění <input name="location" placeholder="Box A, AMS slot 2…"></label>
+        <label class="span-2">Poznámka <textarea name="notes" rows="2"></textarea></label>
+      </div>
+      <p class="hint" data-edit-only>Zůstatek opravíte tlačítkem <b>Převážit</b> v detailu cívky.</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost danger" data-action="delete" data-edit-only>Smazat</button>
+        <button type="button" class="btn ghost" data-action="archive" data-edit-only>Archivovat</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="save" class="btn primary">Uložit</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Detail cívky -->
+  <dialog id="detail-dialog">
+    <div class="detail" id="detail-body"></div>
+  </dialog>
+
+  <!-- Převážení -->
+  <dialog id="adjust-dialog">
+    <form method="dialog" id="adjust-form">
+      <h2>Převážit cívku</h2>
+      <p class="hint" data-hint></p>
+      <div class="segmented">
+        <label><input type="radio" name="mode" value="gross" checked> Váha s cívkou</label>
+        <label><input type="radio" name="mode" value="remaining"> Čistý zbytek</label>
+      </div>
+      <label>Hmotnost (g) <input name="value" type="number" step="0.1" min="0" required autofocus></label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="save" class="btn primary">Uložit</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Tisk -->
+  <dialog id="print-dialog">
+    <form method="dialog" id="print-form">
+      <h2 data-title>Nový tisk</h2>
+      <div class="grid-2">
+        <label class="span-2">Název <input name="name" required placeholder="Držák na sluchátka"></label>
+        <label>Datum <input name="printed_at" type="date" required></label>
+        <label>Výsledek
+          <select name="status"><option value="ok">Povedený</option><option value="failed">Nepovedený</option></select>
+        </label>
+      </div>
+      <fieldset>
+        <legend>Spotřeba filamentu</legend>
+        <div id="usage-rows"></div>
+        <button type="button" class="btn ghost small" id="add-usage">+ Další cívka (vícebarevný tisk)</button>
+        <p class="usage-total" id="usage-total"></p>
+      </fieldset>
+      <label>Poznámka <textarea name="notes" rows="2" placeholder="Nastavení, tryska, co se pokazilo…"></textarea></label>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost danger" data-action="delete" data-edit-only>Smazat</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="save" class="btn primary">Uložit a odečíst</button>
+      </div>
+    </form>
+  </dialog>
+
+  <datalist id="brand-list"></datalist>
+  <datalist id="material-list">
+    <option>PLA</option><option>PLA+</option><option>PETG</option><option>ABS</option><option>ASA</option>
+    <option>TPU</option><option>PA</option><option>PC</option><option>PLA-CF</option><option>PETG-CF</option>
+  </datalist>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

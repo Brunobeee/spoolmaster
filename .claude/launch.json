@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "spoolmaster", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3420 },
+    { "name": "spoolmaster-test", "runtimeExecutable": "env", "runtimeArgs": ["SPOOLMASTER_DB=/private/tmp/claude-501/sm-preview.db", "PORT=3421", "node", "server.js"], "port": 3421 }
+  ]
+}
