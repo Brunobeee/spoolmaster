@@ -37,7 +37,11 @@ Tu zahrň do zálohy NASu. Rychlou ruční zálohu stáhneš v aplikaci přes **
 2. V aplikaci Docker u projektu zvol znovu stáhnout image a restartovat
    (nebo přes SSH: `docker compose pull && docker compose up -d`).
 
-Databáze se při startu sama zmigruje na novou verzi schématu.
+Databáze se při startu sama zmigruje na novou verzi schématu. Když je co migrovat, uloží se
+nejdřív kopie do `data/backups/spoolmaster-<čas>-v<stará verze>.db` (drží se posledních 10).
+Kdyby migrace selhala, kontejner nenaběhne a data zůstanou beze změny; obnova = zastavit
+kontejner, smazat `spoolmaster.db-wal` a `-shm`, zálohu přejmenovat na `data/spoolmaster.db`
+a nasadit předchozí image.
 
 ### Když NAS image nestáhne
 

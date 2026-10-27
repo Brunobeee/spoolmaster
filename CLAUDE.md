@@ -16,7 +16,8 @@ zůstatku převážením cívky.
 
 ## Datový model (`db.js`)
 - Schéma jen přes `MIGRATIONS` (nová migrace na konec, stávající neměnit); během migrací jsou
-  cizí klíče vypnuté kvůli přestavbám tabulek.
+  cizí klíče vypnuté kvůli přestavbám tabulek. Před migrací existující DB se uloží záloha do
+  `data/backups/` (`VACUUM INTO`, posledních 10).
 - `spools` – cívky; `initial_weight` = čistá hmotnost filamentu, `spool_weight` = prázdná cívka (tára)
 - `prints` (`status` planned/ok/failed, `percent`, `duration_min`, `project_id`) + `print_usages`
 - `projects` – skupiny tisků (active/done)
