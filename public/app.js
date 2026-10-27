@@ -782,10 +782,12 @@ function spoolOptions(selectedId) {
   const list = groups.flatMap(g => sortGroup(g).map(s => ({ ...s, inGroup: g.length > 1 })));
   if (selectedId && !list.some(s => s.id === selectedId)) {
     const u = editingPrint?.usages.find(u => u.spool_id === selectedId);
-    if (u) list.push({ id: selectedId, ...u, remaining: NaN });
+    // u.id je id řádku spotřeby, ne cívky — proto id až za spread.
+    if (u) list.push({ ...u, id: selectedId, remaining: NaN });
   }
   const label = s => esc(spoolLabel(s))
-    + (Number.isFinite(s.remaining) ? ` (${fmtG(s.remaining)}${s.inGroup ? (isOpened(s) ? ', načatá' : ', neotevřená') : ''})` : '');
+    + (Number.isFinite(s.remaining) ? ` (${fmtG(s.remaining)}${s.inGroup ? (isOpened(s) ? ', načatá' : ', neotevřená') : ''})`
+      : ' (dotištěná / v archivu)');
   return '<option value="">— vyberte cívku —</option>' + list.map(s =>
     `<option value="${s.id}"${s.id === selectedId ? ' selected' : ''}>${label(s)}</option>`).join('');
 }
