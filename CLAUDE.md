@@ -67,6 +67,9 @@ zůstatku převážením cívky.
 - Inventář slučuje stejné cívky (značka + materiál + název barvy + průměr + hmotnost, `groupKey`)
   do jedné karty „×N“ s celkovým zůstatkem; detail skupiny vypíše jednotlivé cívky
   (načatá / neotevřená = bez spotřeby i korekcí). Načaté se řadí a nabízejí první.
+- Formulář tisku: když se gramáž na vybranou cívku nevejde (`availableOn` počítá i rezervace
+  a řádky formuláře), zbytek se automaticky rozdělí na další stejné cívky (`autoSplit`, při
+  změně pole i při odeslání).
 - „+ Přidat stejnou“ (detail cívky i skupiny) = `POST /api/spools/:id/duplicate` s počtem kusů
   a volitelně jinou cenou; nové cívky jsou plné.
 

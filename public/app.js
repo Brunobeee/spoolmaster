@@ -848,10 +848,21 @@ function updateEstimate() {
     : `≈ ${fmtUsd(filament)} filament${energyText ? ` + ${energyText}` : ''} (${czkHint(filament + (energy ?? 0))})`;
 }
 
+// Kolik gramů může tento tisk z cívky vzít, než klesne pod nulu (bez řádku `exceptRow`).
+// Původní spotřeba upravovaného tisku je buď už odečtená (ok/failed), nebo v rezervaci (planned).
+function availableOn(spool, exceptRow = null) {
+  const rows = $$('.usage-row', printForm);
+  const wasPlanned = editingPrint?.status === 'planned';
+  const original = editingPrint?.usages.filter(u => u.spool_id === spool.id).reduce((a, u) => a + u.grams, 0) ?? 0;
+  const otherRows = rows.filter(r => r !== exceptRow && Number($('select', r).value) === spool.id)
+    .reduce((a, r) => a + (Number($('input', r).value) || 0), 0);
+  const otherReserved = printForm.elements.status.value === 'planned'
+    ? Math.max(0, (spool.reserved ?? 0) - (wasPlanned ? original : 0)) : 0;
+  return { available: spool.remaining + (wasPlanned ? 0 : original) - otherRows - otherReserved, otherReserved };
+}
+
 function updateUsageInfo() {
   const rows = $$('.usage-row', printForm);
-  const status = printForm.elements.status.value;
-  const wasPlanned = editingPrint?.status === 'planned';
   let total = 0;
   for (const row of rows) {
     $('.icon-btn', row).hidden = rows.length === 1;
@@ -861,22 +872,58 @@ function updateUsageInfo() {
     const spool = state.allSpools.find(s => s.id === id);
     const after = $('.after', row);
     if (!spool) { after.textContent = ''; continue; }
-    // Původní spotřeba upravovaného tisku je buď už odečtená (ok/failed), nebo v rezervaci (planned).
-    const original = editingPrint?.usages.filter(u => u.spool_id === id).reduce((a, u) => a + u.grams, 0) ?? 0;
-    const sameSpoolOther = rows.filter(r => r !== row && Number($('select', r).value) === id)
-      .reduce((a, r) => a + (Number($('input', r).value) || 0), 0);
-    let left = spool.remaining + (wasPlanned ? 0 : original) - grams - sameSpoolOther;
-    let note = '';
-    if (status === 'planned') {
-      const otherReserved = Math.max(0, (spool.reserved ?? 0) - (wasPlanned ? original : 0));
-      left -= otherReserved;
-      if (otherReserved > 0) note = ` · počítá s ${fmtG(otherReserved)} pro jiné naplánované tisky`;
-    }
+    const { available, otherReserved } = availableOn(spool, row);
+    const left = available - grams;
+    const note = otherReserved > 0 ? ` · počítá s ${fmtG(otherReserved)} pro jiné naplánované tisky` : '';
     after.textContent = `Po tisku zbude ${fmtG(left)}${note}`;
     after.classList.toggle('neg', left < 0);
   }
   $('#usage-total').textContent = rows.length > 1 ? `Celkem ${fmtG(total)}` : '';
   updateEstimate();
+}
+
+// Když se tisk na cívku nevejde a existují další stejné cívky, zbytek se přesune na ně
+// (napřed načaté, pak neotevřené), aby se nemuselo počítat ručně.
+function autoSplit(row) {
+  const spool = state.allSpools.find(s => s.id === Number($('select', row).value));
+  const grams = Number($('input', row).value) || 0;
+  if (!spool || grams <= 0) return false;
+  const available = round1(Math.max(0, availableOn(spool, row).available));
+  if (grams <= available) return false;
+
+  const taken = new Set($$('.usage-row select', printForm).map(sel => Number(sel.value)));
+  const next = sortGroup(state.allSpools.filter(s =>
+    s.id !== spool.id && !taken.has(s.id) && groupKey(s) === groupKey(spool)));
+  if (!next.length) return false;
+
+  const parts = [];
+  const describe = (s, g) => `${fmtG(g)} z ${s.id === spool.id || isOpened(s) ? 'načaté' : 'neotevřené'} cívky`;
+  let rest = grams;
+  let reuseRow = row;
+  if (available > 0) {
+    $('input', row).value = available;
+    parts.push(describe(spool, available));
+    rest = round1(rest - available);
+    reuseRow = null;
+  }
+  for (const [i, s] of next.entries()) {
+    if (rest <= 0) break;
+    const g = i === next.length - 1 ? rest : round1(Math.min(rest, Math.max(0, availableOn(s).available)));
+    if (g <= 0) continue;
+    if (reuseRow) {
+      // Na původní cívce nezbylo nic, řádek se jen přepne na další.
+      $('select', reuseRow).value = s.id;
+      $('input', reuseRow).value = g;
+      reuseRow = null;
+    } else {
+      addUsageRow(s.id, g);
+    }
+    parts.push(describe(s, g));
+    rest = round1(rest - g);
+  }
+  updateUsageInfo();
+  toast(`Rozděleno: ${parts.join(' + ')}`);
+  return true;
 }
 
 function updatePrintMode() {
@@ -890,6 +937,12 @@ function updatePrintMode() {
 }
 
 $('#usage-rows').addEventListener('input', updateUsageInfo);
+$('#usage-rows').addEventListener('change', e => {
+  const row = e.target.closest('.usage-row');
+  if (row) autoSplit(row);
+});
+// Enter v poli gramů odešle formulář dřív, než stihne proběhnout change.
+printForm.addEventListener('submit', () => $$('.usage-row', printForm).forEach(autoSplit));
 $('#usage-rows').addEventListener('click', e => {
   if (e.target.closest('.icon-btn')) { e.target.closest('.usage-row').remove(); updateUsageInfo(); }
 });
