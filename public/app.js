@@ -56,18 +56,30 @@ const statusTag = p => p.status === 'planned' ? '<span class="tag">naplánováno
   : p.status === 'failed' ? `<span class="tag failed">nepovedený · ${Math.round(p.percent ?? 0)} %</span>` : '';
 const projectTag = p => p.project_name ? `<span class="tag project-tag">${esc(p.project_name)}</span>` : '';
 
+// Bublina je popover, takže je v top layer nad modálními dialogy (z-index na ně nestačí).
+// Při každém zobrazení se znovu otevře, aby skončila nad naposledy otevřeným dialogem.
 let toastTimer;
 function toast(msg, isError = false) {
   const el = $('#toast');
   el.textContent = msg;
   el.classList.toggle('error', isError);
-  el.classList.add('show');
+  if (el.matches(':popover-open')) el.hidePopover();
+  el.showPopover();
+  requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+    toastTimer = setTimeout(() => el.hidePopover(), 200);
+  }, 2800);
 }
 
-for (const d of $$('dialog')) {
-  // Desetinná čárka: číselná pole jsou textová s inputmode="decimal" (type=number se v Safari
+// Dialog otevřený až po bublině (např. znovu po chybě uložení) by ji jinak překryl.
+new MutationObserver(() => {
+  const el = $('#toast');
+  if (el.matches(':popover-open')) { el.hidePopover(); el.showPopover(); }
+}).observe(document.body, { subtree: true, attributeFilter: ['open'] });
+
+// Desetinná čárka: číselná pole jsou textová s inputmode="decimal" (type=number se v Safari
 // a některých lokalizacích s čárkou neshodne), takže čárku při psaní převedeme na tečku.
 document.addEventListener('input', e => {
   const el = e.target;
@@ -77,7 +89,8 @@ document.addEventListener('input', e => {
   el.setSelectionRange(pos, pos);
 }, true);
 
-// Zavření dialogu kliknutím mimo obsah
+for (const d of $$('dialog')) {
+  // Zavření dialogu kliknutím mimo obsah
   d.addEventListener('click', e => {
     const r = d.getBoundingClientRect();
     const outside = e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
@@ -922,7 +935,8 @@ function autoSplit(row) {
     rest = round1(rest - g);
   }
   updateUsageInfo();
-  toast(`Rozděleno: ${parts.join(' + ')}`);
+  toast(parts.length > 1 ? `Rozděleno: ${parts.join(' + ')}`
+    : `Na vybrané cívce nic nezbývá, použito ${parts[0]}`);
   return true;
 }
 
