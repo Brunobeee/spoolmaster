@@ -325,3 +325,8 @@ legend { color: var(--muted); font-size: .88rem; padding: 0 4px; }
 .group-tags { justify-self: end; display: flex; gap: 6px; align-items: center; }
 
 fieldset > .btn { align-self: flex-start; }
+
+/* Smazání tisku: volba, co s filamentem */
+.delete-choices { display: flex; flex-direction: column; gap: 8px; }
+.btn.choice { flex-direction: column; align-items: flex-start; gap: 2px; white-space: normal; text-align: left; padding: 12px 14px; }
+.btn.danger-bg { background: var(--danger); border-color: var(--danger); color: #fff; }

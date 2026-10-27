@@ -1023,15 +1023,28 @@ printDialog.addEventListener('close', async () => {
   }
 });
 
-$('[data-action="delete"]', printForm).addEventListener('click', async () => {
-  const msg = editingPrint.status === 'planned'
+// Smazání tisku: u proběhlého tisku se ptáme, jestli šlo o chybný záznam (gramy vrátit),
+// nebo jen o úklid (spotřeba zůstane odečtená).
+const deletePrintDialog = $('#delete-print-dialog');
+
+$('[data-action="delete"]', printForm).addEventListener('click', () => {
+  const planned = editingPrint.status === 'planned';
+  $('[data-delete-text]', deletePrintDialog).textContent = planned
     ? `Smazat naplánovaný tisk „${editingPrint.name}“? Rezervace filamentu se zruší.`
-    : `Smazat tisk „${editingPrint.name}“? Gramáž se vrátí na cívky.`;
-  if (!confirm(msg)) return;
+    : `Smazat tisk „${editingPrint.name}“ (${fmtG(printGrams(editingPrint))})? Co se má stát s filamentem?`;
+  $$('[data-when-done]', deletePrintDialog).forEach(el => el.hidden = planned);
+  $('[data-when-planned]', deletePrintDialog).hidden = !planned;
+  deletePrintDialog.showModal();
+});
+
+deletePrintDialog.addEventListener('close', async () => {
+  const choice = deletePrintDialog.returnValue;
+  if (!['return', 'keep'].includes(choice)) return;
   try {
-    await api(`/prints/${editingPrint.id}`, { method: 'DELETE' });
+    await api(`/prints/${editingPrint.id}${choice === 'keep' ? '?keep=1' : ''}`, { method: 'DELETE' });
     printDialog.close('done');
-    toast(editingPrint.status === 'planned' ? 'Naplánovaný tisk smazán' : 'Tisk smazán, gramáž vrácena');
+    toast(editingPrint.status === 'planned' ? 'Naplánovaný tisk smazán'
+      : choice === 'keep' ? 'Tisk smazán, spotřeba zůstala odečtená' : 'Tisk smazán, gramáž vrácena');
     await refresh();
   } catch (err) { toast(err.message, true); }
 });

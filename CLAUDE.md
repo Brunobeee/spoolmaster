@@ -23,6 +23,8 @@ zůstatku převážením cívky.
 - `adjustments` – ruční korekce (převážení); `settings` – key/value nastavení
 - Zůstatek se **neukládá**, počítá se v `SPOOL_SELECT`: initial − Σ usages (bez planned) + Σ adjustments;
   `reserved` = Σ usages naplánovaných tisků. Smazání/úprava tisku tak gramy automaticky vrátí.
+  Při mazání proběhlého tisku se UI ptá: vrátit filament (chybný záznam), nebo ponechat odečtený
+  (`DELETE /api/prints/:id?keep=1` převede spotřebu na korekce „Smazaný tisk: …“).
 - Ceny počítá `PRINT_SELECT` živě (v USD) z ceny a měny cívky, kurzu a nastavení: filament NULL,
   když některá cívka nemá cenu; elektřina = čas × příkon × Kč/kWh ÷ kurz USD × percent.
 

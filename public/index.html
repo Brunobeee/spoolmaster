@@ -111,6 +111,29 @@
     </form>
   </dialog>
 
+  <!-- Smazání tisku -->
+  <dialog id="delete-print-dialog">
+    <form method="dialog">
+      <h2>Smazat tisk</h2>
+      <p data-delete-text></p>
+      <div class="delete-choices">
+        <button value="return" class="btn choice" data-when-done>
+          <b>Vrátit filament na cívky</b>
+          <span class="hint">Záznam byl chybný, tisk ve skutečnosti neproběhl.</span>
+        </button>
+        <button value="keep" class="btn choice" data-when-done>
+          <b>Ponechat filament odečtený</b>
+          <span class="hint">Tisk proběhl, jen nechci jeho záznam. Spotřeba zůstane v historii cívky jako korekce.</span>
+        </button>
+      </div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zrušit</button>
+        <button value="return" class="btn primary danger-bg" data-when-planned>Smazat</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Převážení -->
   <dialog id="adjust-dialog">
     <form method="dialog" id="adjust-form">

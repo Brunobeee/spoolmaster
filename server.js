@@ -299,9 +299,17 @@ app.post('/api/prints/:id/complete', (req, res) => {
   res.json(getPrint(print.id));
 });
 
+// ?keep=1: tisk proběhl, jen se maže záznam — spotřeba zůstane odečtená jako korekce na cívkách.
 app.delete('/api/prints/:id', (req, res) => {
-  getPrint(req.params.id);
-  db.prepare('DELETE FROM prints WHERE id = ?').run(req.params.id);
+  const print = getPrint(req.params.id);
+  const keep = req.query.keep === '1' && print.status !== 'planned';
+  tx(() => {
+    if (keep) {
+      const stmt = db.prepare('INSERT INTO adjustments (spool_id, delta, reason) VALUES (?, ?, ?)');
+      for (const u of print.usages) stmt.run(u.spool_id, -u.grams, `Smazaný tisk: ${print.name}`);
+    }
+    db.prepare('DELETE FROM prints WHERE id = ?').run(print.id);
+  });
   res.status(204).end();
 });
 
