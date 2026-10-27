@@ -350,7 +350,8 @@ img.thumb:hover { transform: scale(1.06); }
 #image-dialog[open] { animation: none; }
 #image-dialog::backdrop { animation: fade-in .38s ease-out; transition: opacity .28s; }
 #image-dialog.closing::backdrop { opacity: 0; }
-#image-dialog .image-close { animation: fade-in .38s ease-out; }
+/* Křížek až ve chvíli, kdy obrázek doroste (zpoždění ≈ délka animace otevření). */
+#image-dialog .image-close { animation: fade-in .18s ease-out .3s both; }
 #image-dialog.closing .image-close { opacity: 0; transition: opacity .15s; }
 @keyframes fade-in { from { opacity: 0; } }
 #image-dialog img {
