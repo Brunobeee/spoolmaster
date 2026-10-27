@@ -1,44 +1,64 @@
-# SpoolMaster
+<h1 align="center">🧵 SpoolMaster</h1>
 
-Evidence filamentu pro 3D tisk: inventář cívek, spotřeba podle tisků, korekce převážením.
+<p align="center">
+  <b>Vždycky víš, kolik filamentu ti zbývá.</b><br>
+  Domácí evidence cívek pro 3D tisk: inventář, spotřeba podle tisků a (brzy) archiv 3MF projektů.
+</p>
 
-## Lokální vývoj
+<p align="center">
+  <img src="docs/inventar.jpg" alt="Inventář cívek v SpoolMasteru" width="800">
+</p>
 
-```bash
-npm install
-npm run dev
-```
+---
 
-Aplikace běží na http://localhost:3420, data jsou v `data/spoolmaster.db`.
+## Proč
 
-## Nasazení na NAS (UGREEN UGOS, aplikace Docker)
+Než pustíš osmihodinový tisk, chceš vědět, jestli na cívce zbývá 300 gramů, nebo jen 80.
+Odhad podle oka nefunguje, převažovat každou cívku před tiskem nikoho nebaví a tabulky se
+po třetím tisku přestanou vyplňovat.
 
-Image se staví automaticky přes GitHub Actions při každém pushi do `main`
-a publikuje se jako `ghcr.io/brunobeee/spoolmaster` (amd64 i arm64).
+SpoolMaster to řeší jednoduše. Každou cívku zapíšeš jednou, pak ke každému tisku zadáš gramy
+ze sliceru a zůstatek se odečte sám. Kdykoli vidíš, co máš skladem, co dochází a kolik
+filamentu tento měsíc prošlo tiskárnou.
 
-### Poprvé
+## Co umí
 
-1. Na NASu vytvoř složku pro projekt, např. `docker/spoolmaster`.
-2. V aplikaci **Docker** otevři **Projekt → Vytvořit**, jako cestu zvol tu složku
-   a vlož obsah [`docker-compose.yml`](docker-compose.yml).
-3. Spusť projekt. Aplikace poběží na `http://<IP-NASu>:3420`.
+- 🎨 **Inventář cívek**: značka, materiál, barva, umístění, cena. Kruh u každé cívky ukazuje,
+  kolik filamentu zbývá.
+- ➖ **Odečet podle tisků**: zadáš gramy ze sliceru a odečtou se z cívky. Vícebarevný tisk z AMS
+  bere z více cívek najednou.
+- ⚖️ **Převážení**: položíš cívku na váhu, odečte se hmotnost prázdné cívky a zůstatek se opraví.
+  Rozdíl se zapíše do historie.
+- ↩️ **Nic se neztratí**: zůstatek se pokaždé dopočítá z historie, takže smazání nebo úprava
+  tisku gramy na cívku vrátí.
+- ⚠️ **Upozornění, že dochází**: cívky pod nastavenou hranicí jsou vidět na první pohled.
+- 📊 **Přehled**: kolik máš skladem, kolik dochází a kolik se spotřebovalo tento měsíc.
+- 💾 **Záloha jedním klikem**: export celé databáze ke stažení.
+- 📱 **Funguje na mobilu**: zápis přímo u tiskárny.
 
-Data (databáze, později i 3MF soubory) jsou ve složce `data/` uvnitř projektové složky.
-Tu zahrň do zálohy NASu. Rychlou ruční zálohu stáhneš v aplikaci přes **Nastavení → Exportovat databázi**.
+## Kam to směřuje
 
-### Aktualizace
+| Fáze | Obsah | Stav |
+| --- | --- | --- |
+| 1 | Docker image pro NAS, migrace databáze, nastavení | ✅ hotovo |
+| 2 | Projekty, fronta naplánovaných tisků, cena tisku (filament + elektřina) | 🔜 další |
+| 3 | Import 3MF z Bambu Studia: gramáž po filamentech, náhled, „vytisknout znovu“ | ⏳ plán |
+| 4 | Ikona na plochu mobilu (PWA) a doladění mobilu | ⏳ plán |
 
-1. Push do `main` → počkej, až doběhne GitHub Action „Docker image“.
-2. V aplikaci Docker u projektu zvol znovu stáhnout image a restartovat
-   (nebo přes SSH: `docker compose pull && docker compose up -d`).
+Cílový postup: po slicování nahraješ 3MF na počítači a tisk se zařadí do fronty. Po dotisku
+na mobilu klepneš **Hotovo** nebo **Selhalo** a gramy se odečtou ze správných cívek.
 
-Databáze se při startu sama zmigruje na novou verzi schématu.
+## Pro koho
 
-### Když NAS image nestáhne
+Pro jednoho tiskaře a jeho dílnu. Aplikace běží doma (typicky v Dockeru na NASu), nemá
+přihlašování a data nikam neodesílá. Vznikla pro Bambu Lab X1C s AMS, ale ruční evidence
+funguje s jakoukoli tiskárnou.
 
-GitHub zakládá balíček v GHCR někdy jako soukromý. V GitHubu otevři
-**Profil → Packages → spoolmaster → Package settings → Change visibility → Public**.
+## Pod kapotou
 
-## Přenos dat z Macu
+Node.js + Express a SQLite přímo v Node (`node:sqlite`). Frontend je čisté HTML, CSS a JavaScript
+bez build kroku. Celá aplikace je pár souborů a jeden Docker image pro amd64 i arm64.
 
-Zastav kontejner, zkopíruj `data/spoolmaster.db` z Macu do `data/` na NASu a kontejner znovu spusť.
+## Spuštění
+
+Lokální vývoj a nasazení na NAS jsou popsané v **[docs/SETUP.md](docs/SETUP.md)**.
