@@ -78,6 +78,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 64px; }
 .btn.ghost:hover { background: var(--surface-2); }
 .btn.danger { color: var(--danger); }
 .btn.small { padding: 5px 10px; font-size: .9rem; }
+.btn.icon { padding: 7px; color: var(--muted); }
+.btn.icon svg { width: 20px; height: 20px; display: block; }
+a.btn { text-decoration: none; align-self: flex-start; }
 
 input, select, textarea {
   font: inherit; color: var(--text); background: var(--surface);

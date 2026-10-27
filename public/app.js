@@ -1,9 +1,7 @@
-const LOW_THRESHOLD = 150;
-
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { spools: [], allSpools: [], prints: [], tab: 'inventory' };
+const state = { spools: [], allSpools: [], prints: [], settings: {}, tab: 'inventory' };
 
 // --- Pomocné ---
 
@@ -73,8 +71,12 @@ async function loadStats() {
   $('#stats').innerHTML = `
     <div class="stat"><div class="label">Aktivních cívek</div><div class="value num">${s.spoolCount}</div></div>
     <div class="stat"><div class="label">Filamentu skladem</div><div class="value num">${fmtG(s.totalRemaining)}</div></div>
-    <div class="stat${s.lowCount ? ' warn' : ''}"><div class="label">Dochází (pod ${LOW_THRESHOLD} g)</div><div class="value num">${s.lowCount}</div></div>
+    <div class="stat${s.lowCount ? ' warn' : ''}"><div class="label">Dochází (pod ${state.settings.low_threshold} g)</div><div class="value num">${s.lowCount}</div></div>
     <div class="stat"><div class="label">Spotřeba tento měsíc · ${s.month.prints} ${s.month.prints === 1 ? 'tisk' : s.month.prints >= 2 && s.month.prints <= 4 ? 'tisky' : 'tisků'}</div><div class="value num">${fmtG(s.month.grams)}</div></div>`;
+}
+
+async function loadSettings() {
+  state.settings = await api('/settings');
 }
 
 const refresh = () => Promise.all([loadSpools(), loadPrints(), loadStats()]);
@@ -108,7 +110,7 @@ function renderSpools() {
   if (!list.length) { grid.innerHTML = '<div class="empty-state">Nic neodpovídá filtru.</div>'; return; }
 
   grid.innerHTML = list.map(s => {
-    const low = s.remaining < LOW_THRESHOLD;
+    const low = s.remaining < state.settings.low_threshold;
     const empty = s.remaining <= 0;
     return `
       <button class="spool${low ? ' low' : ''}${empty ? ' empty' : ''}" data-spool="${s.id}" style="--spool:${esc(s.color_hex)}">
@@ -149,6 +151,8 @@ function openSpoolForm(spool = null) {
       if (el.name && el.name in spool) el.value = spool[el.name] ?? '';
     }
     $('[data-action="archive"]', spoolForm).textContent = spool.archived ? 'Obnovit z archivu' : 'Archivovat';
+  } else {
+    spoolForm.elements.spool_weight.value = state.settings.default_spool_weight ?? '';
   }
   spoolDialog.showModal();
 }
@@ -403,6 +407,27 @@ $('[data-action="delete"]', printForm).addEventListener('click', async () => {
   } catch (err) { toast(err.message, true); }
 });
 
+// --- Nastavení ---
+
+const settingsDialog = $('#settings-dialog');
+const settingsForm = $('#settings-form');
+
+$('#open-settings').addEventListener('click', () => {
+  for (const [key, value] of Object.entries(state.settings)) {
+    if (settingsForm.elements[key]) settingsForm.elements[key].value = value;
+  }
+  settingsDialog.showModal();
+});
+
+settingsDialog.addEventListener('close', async () => {
+  if (settingsDialog.returnValue !== 'save') return;
+  try {
+    state.settings = await api('/settings', { method: 'PUT', body: Object.fromEntries(new FormData(settingsForm)) });
+    toast('Nastavení uloženo');
+    await refresh();
+  } catch (err) { toast(err.message, true); settingsDialog.showModal(); }
+});
+
 // --- Záložky ---
 
 function setTab(tab) {
@@ -417,4 +442,4 @@ const tabFromHash = () => setTab(location.hash === '#prints' ? 'prints' : 'inven
 addEventListener('hashchange', tabFromHash);
 tabFromHash();
 
-refresh().catch(err => toast(err.message, true));
+loadSettings().then(refresh).catch(err => toast(err.message, true));

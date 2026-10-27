@@ -1,0 +1,12 @@
+services:
+  spoolmaster:
+    image: ghcr.io/brunobeee/spoolmaster:latest
+    container_name: spoolmaster
+    restart: unless-stopped
+    ports:
+      - "3420:3420"
+    volumes:
+      # Databáze a (od fáze 3) nahrané 3MF soubory. Tuhle složku zálohuj.
+      - ./data:/data
+    environment:
+      - TZ=Europe/Prague

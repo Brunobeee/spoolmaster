@@ -1,7 +1,9 @@
 import express from 'express';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, SPOOL_SELECT, tx } from './db.js';
+import { db, getSettings, saveSettings, SETTINGS_DEFAULTS, SPOOL_SELECT, tx } from './db.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -190,6 +192,7 @@ app.delete('/api/prints/:id', (req, res) => {
 
 app.get('/api/stats', (req, res) => {
   const spools = db.prepare(`${SPOOL_SELECT} WHERE s.archived = 0`).all();
+  const { low_threshold } = getSettings();
   const month = db.prepare(`
     SELECT COALESCE(SUM(u.grams), 0) AS grams, COUNT(DISTINCT p.id) AS prints
     FROM prints p LEFT JOIN print_usages u ON u.print_id = p.id
@@ -200,10 +203,41 @@ app.get('/api/stats', (req, res) => {
   res.json({
     spoolCount: spools.length,
     totalRemaining: spools.reduce((a, s) => a + Math.max(s.remaining, 0), 0),
-    lowCount: spools.filter(s => s.remaining < 150).length,
+    lowCount: spools.filter(s => s.remaining < low_threshold).length,
     month,
     byMaterial,
   });
+});
+
+// --- Nastavení a export ---
+
+app.get('/api/settings', (req, res) => res.json(getSettings()));
+
+app.put('/api/settings', (req, res) => {
+  const values = {};
+  for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+    if (!(key in req.body)) continue;
+    const v = Number(req.body[key]);
+    if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Neplatná hodnota: ${key}`);
+    values[key] = v;
+  }
+  res.json(saveSettings(values));
+});
+
+// VACUUM INTO vytvoří konzistentní kopii i za běhu (včetně dat ještě ve WAL).
+app.get('/api/export', (req, res, next) => {
+  const file = join(tmpdir(), `spoolmaster-export-${Date.now()}.db`);
+  db.prepare('VACUUM INTO ?').run(file);
+  const name = `spoolmaster-${new Date().toISOString().slice(0, 10)}.db`;
+  res.download(file, name, err => {
+    rmSync(file, { force: true });
+    if (err && !res.headersSent) next(err);
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  db.prepare('SELECT 1').get();
+  res.json({ ok: true });
 });
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Nenalezeno' }));

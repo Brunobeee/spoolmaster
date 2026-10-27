@@ -10,9 +10,14 @@ mkdirSync(dirname(dbPath), { recursive: true });
 export const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
 
+// Schéma se mění jen přidáním nové migrace na konec seznamu — nikdy neupravovat ty stávající.
+// Verze se drží v PRAGMA user_version. Migrace 1 používá IF NOT EXISTS, aby navázala
+// i na databáze z doby před migracemi (user_version = 0).
+//
 // Zůstatek cívky se nikde neukládá — vždy se počítá z počáteční hmotnosti,
 // spotřeby v tiscích a ručních korekcí (vážení). Smazání tisku tak gramy vrátí.
-db.exec(`
+const MIGRATIONS = [
+  `
   CREATE TABLE IF NOT EXISTS spools (
     id             INTEGER PRIMARY KEY,
     brand          TEXT NOT NULL DEFAULT '',
@@ -56,7 +61,25 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_usages_print ON print_usages(print_id);
   CREATE INDEX IF NOT EXISTS idx_usages_spool ON print_usages(spool_id);
   CREATE INDEX IF NOT EXISTS idx_adj_spool ON adjustments(spool_id);
-`);
+  `,
+  `
+  CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
+];
+
+function migrate() {
+  const current = db.prepare('PRAGMA user_version').get().user_version;
+  for (let v = current; v < MIGRATIONS.length; v++) {
+    tx(() => {
+      db.exec(MIGRATIONS[v]);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+    });
+    console.log(`Databáze migrována na verzi ${v + 1}`);
+  }
+}
 
 export const SPOOL_SELECT = `
   SELECT s.*,
@@ -78,4 +101,29 @@ export function tx(fn) {
     db.exec('ROLLBACK');
     throw err;
   }
+}
+
+migrate();
+
+// --- Nastavení ---
+
+export const SETTINGS_DEFAULTS = {
+  kwh_price: 6,              // Kč za kWh
+  printer_watts: 150,        // průměrný příkon tiskárny ve W
+  low_threshold: 150,        // pod kolik gramů cívka „dochází“
+  default_spool_weight: 250, // hmotnost prázdné cívky pro nové cívky (g)
+};
+
+export function getSettings() {
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const stored = Object.fromEntries(rows.map(r => [r.key, Number(r.value)]));
+  return { ...SETTINGS_DEFAULTS, ...stored };
+}
+
+export function saveSettings(values) {
+  const stmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  tx(() => {
+    for (const [key, value] of Object.entries(values)) stmt.run(key, String(value));
+  });
+  return getSettings();
 }
