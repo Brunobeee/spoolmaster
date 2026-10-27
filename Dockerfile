@@ -11,7 +11,8 @@ RUN apk add --no-cache tzdata
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY server.js db.js ./
+# Všechny moduly serveru (nový .js soubor v kořeni se tak nezapomene přidat).
+COPY *.js ./
 COPY public ./public
 
 # Běží jako root kvůli právům na připojené složky NASu (UGOS je vytváří pod svým uživatelem).
