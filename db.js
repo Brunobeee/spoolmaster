@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -118,6 +118,7 @@ const MIGRATIONS = [
 function migrate() {
   const current = db.prepare('PRAGMA user_version').get().user_version;
   if (current >= MIGRATIONS.length) return;
+  backupBeforeMigration(current);
   db.exec('PRAGMA foreign_keys = OFF');
   try {
     for (let v = current; v < MIGRATIONS.length; v++) {
@@ -134,6 +135,23 @@ function migrate() {
   }
   const broken = db.prepare('PRAGMA foreign_key_check').all();
   if (broken.length) throw new Error(`Databáze porušuje cizí klíče: ${JSON.stringify(broken)}`);
+}
+
+// Před migrací existující databáze se uloží kopie do data/backups (nová prázdná DB se nezálohuje).
+// VACUUM INTO dá konzistentní soubor i s obsahem WAL. Drží se posledních BACKUP_KEEP záloh.
+const BACKUP_KEEP = 10;
+function backupBeforeMigration(version) {
+  const hasTables = db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get().n > 0;
+  if (!hasTables) return;
+  const dir = join(dirname(dbPath), 'backups');
+  mkdirSync(dir, { recursive: true });
+  // Místní čas (TZ kontejneru), ať názvy sedí s časem na NASu.
+  const stamp = new Date().toLocaleString('sv-SE').replace(' ', 'T').replace(/:/g, '-');
+  const file = join(dir, `spoolmaster-${stamp}-v${version}.db`);
+  db.prepare('VACUUM INTO ?').run(file);
+  console.log(`Záloha před migrací: ${file}`);
+  const old = readdirSync(dir).filter((f) => /^spoolmaster-.*-v\d+\.db$/.test(f)).sort();
+  for (const f of old.slice(0, -BACKUP_KEEP)) unlinkSync(join(dir, f));
 }
 
 // Naplánované tisky zůstatek nemění, jen rezervují (reserved).
