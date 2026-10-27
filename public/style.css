@@ -346,6 +346,13 @@ img.thumb:hover { transform: scale(1.06); }
   width: fit-content; height: fit-content; max-width: none; max-height: none; margin: auto;
   padding: 0; border: 0; background: transparent; box-shadow: none; overflow: visible;
 }
+/* Pohyb obstarává animace obrázku z místa náhledu (app.js), ne obecný „pop“ dialogů. */
+#image-dialog[open] { animation: none; }
+#image-dialog::backdrop { animation: fade-in .38s ease-out; transition: opacity .28s; }
+#image-dialog.closing::backdrop { opacity: 0; }
+#image-dialog .image-close { animation: fade-in .38s ease-out; }
+#image-dialog.closing .image-close { opacity: 0; transition: opacity .15s; }
+@keyframes fade-in { from { opacity: 0; } }
 #image-dialog img {
   display: block; width: min(512px, 92vw, 80vh); height: auto; aspect-ratio: 1;
   border-radius: 16px; background: var(--surface); box-shadow: 0 20px 60px rgb(0 0 0 / .4); cursor: zoom-out;

@@ -80,16 +80,68 @@ function toast(msg, isError = false) {
 
 // Náhled modelu jde rozkliknout. Zachytává se už ve fázi capture, aby klik neotevřel i řádek
 // nebo kartu, ve které náhled je (a v importu nepřepnul zaškrtnutí podložky).
+// Zvětšení vyrůstá z místa malého náhledu a při zavření se do něj vrací.
 const imageDialog = $('#image-dialog');
+const bigImage = $('img', imageDialog);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+let zoomedThumb = null;
+
+// Transformace, která velký obrázek posune a zmenší přesně na místo malého náhledu.
+function thumbTransform(thumb) {
+  const from = thumb.getBoundingClientRect();
+  const to = bigImage.getBoundingClientRect();
+  if (!from.width || !to.width) return null;
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+  return `translate(${dx}px, ${dy}px) scale(${from.width / to.width})`;
+}
+
+function openZoom(thumb) {
+  zoomedThumb = thumb;
+  bigImage.src = thumb.src;
+  imageDialog.classList.remove('closing');
+  imageDialog.showModal();
+  const start = thumbTransform(thumb);
+  if (!start || reduceMotion.matches) return;
+  thumb.style.visibility = 'hidden';
+  bigImage.animate([{ transform: start, borderRadius: '40px' }, { transform: 'none' }],
+    { duration: 380, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+}
+
+function closeZoom() {
+  if (!imageDialog.open || imageDialog.classList.contains('closing')) return;
+  const thumb = zoomedThumb;
+  const end = thumb?.isConnected ? thumbTransform(thumb) : null;
+  let anim = null;
+  const done = () => {
+    if (!imageDialog.classList.contains('closing')) return;
+    anim?.cancel();
+    imageDialog.close();
+    imageDialog.classList.remove('closing');
+    if (thumb) thumb.style.visibility = '';
+  };
+  imageDialog.classList.add('closing');
+  if (reduceMotion.matches) return done();
+  // Když náhled mezitím zmizel (překreslení seznamu), obrázek jen zmizí na místě.
+  anim = bigImage.animate(end
+    ? [{ transform: 'none' }, { transform: end, borderRadius: '40px' }]
+    : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.92)' }],
+  { duration: 280, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+  anim.finished.then(done, () => {});
+  // Pojistka: ve skryté záložce animace neběží a .finished by nikdy nenastalo.
+  setTimeout(done, 320);
+}
+
 document.addEventListener('click', e => {
   const img = e.target.closest?.('img.thumb');
   if (!img) return;
   e.preventDefault();
   e.stopPropagation();
-  $('img', imageDialog).src = img.src;
-  imageDialog.showModal();
+  openZoom(img);
 }, true);
-imageDialog.addEventListener('click', () => imageDialog.close());
+imageDialog.addEventListener('click', closeZoom);
+imageDialog.addEventListener('cancel', e => { e.preventDefault(); closeZoom(); });
+imageDialog.addEventListener('close', () => { if (zoomedThumb) zoomedThumb.style.visibility = ''; });
 
 // Dialog otevřený až po bublině (např. znovu po chybě uložení) by ji jinak překryl.
 new MutationObserver(() => {
@@ -108,6 +160,8 @@ document.addEventListener('input', e => {
 }, true);
 
 for (const d of $$('dialog')) {
+  // Zvětšený náhled se zavírá vlastní animací (closeZoom).
+  if (d === imageDialog) continue;
   // Zavření dialogu kliknutím mimo obsah
   d.addEventListener('click', e => {
     const r = d.getBoundingClientRect();
