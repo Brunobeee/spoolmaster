@@ -35,8 +35,9 @@ filamentu tento měsíc prošlo tiskárnou.
   **Hotovo**, nebo **Selhalo** a zadáš, kolik procent se vytisklo. Gramy se přepočítají samy.
 - 🗂️ **Projekty**: tisky seskupíš do projektu a vidíš jeho celkovou gramáž a cenu, včetně toho,
   kolik stály nepovedené pokusy.
-- 💰 **Cena tisku**: filament podle ceny cívky a elektřina podle času tisku. Když cena chybí,
-  aplikace napíše „cena neznámá“, nikdy si nevymyslí 0 Kč.
+- 💰 **Cena tisku**: filament podle ceny cívky a elektřina podle času tisku. Počítá se v dolarech
+  (cívku jde zadat i v eurech nebo korunách) a vedle je přepočet na koruny podle denního kurzu ČNB.
+  Když cena chybí, aplikace napíše „cena neznámá“, nikdy si nevymyslí nulu.
 - ⚠️ **Upozornění, že dochází**: cívky pod nastavenou hranicí jsou vidět na první pohled.
 - 📊 **Přehled**: kolik máš skladem, kolik dochází a kolik se spotřebovalo tento měsíc.
 - 💾 **Záloha jedním klikem**: export celé databáze ke stažení.

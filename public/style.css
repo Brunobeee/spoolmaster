@@ -303,3 +303,8 @@ legend { color: var(--muted); font-size: .88rem; padding: 0 4px; }
 @media (prefers-reduced-motion: reduce) {
   *, dialog[open] { animation: none !important; transition: none !important; }
 }
+
+/* Cena + měna v jednom poli */
+.price-input { display: grid; grid-template-columns: 1fr auto; }
+.price-input input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.price-input select { width: auto; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; color: var(--text); }

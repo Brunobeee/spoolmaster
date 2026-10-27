@@ -23,8 +23,8 @@ zůstatku převážením cívky.
 - `adjustments` – ruční korekce (převážení); `settings` – key/value nastavení
 - Zůstatek se **neukládá**, počítá se v `SPOOL_SELECT`: initial − Σ usages (bez planned) + Σ adjustments;
   `reserved` = Σ usages naplánovaných tisků. Smazání/úprava tisku tak gramy automaticky vrátí.
-- Ceny počítá `PRINT_SELECT` živě z ceny cívky a nastavení: filament NULL, když některá cívka
-  nemá cenu; elektřina = čas × příkon × Kč/kWh × percent.
+- Ceny počítá `PRINT_SELECT` živě (v USD) z ceny a měny cívky, kurzu a nastavení: filament NULL,
+  když některá cívka nemá cenu; elektřina = čas × příkon × Kč/kWh ÷ kurz USD × percent.
 
 ## Rozhodnutí (odsouhlaseno 2026-10-27)
 
@@ -55,6 +55,11 @@ zůstatku převážením cívky.
 - Projekt ukazuje celkovou gramáž a cenu, nepovedené tisky se započítají a ukážou zvlášť.
 - Cena tisku = filament (cena cívky / hmotnost) + elektřina zvlášť (čas × příkon × Kč/kWh).
   Bez ceny cívky „cena neznámá“, nikdy 0 Kč.
+- **Hlavní měna je USD** (filament se kupuje hlavně v zahraničí). Cívka má měnu USD (výchozí) / EUR / CZK;
+  všechny ceny se přepočítají na USD a vedle se ukáže orientační přepočet na Kč. Kurzy: denní lístek ČNB
+  (`rates.js`, tabulka `exchange_rates`, obnova každých 6 h, offline poslední známý kurz).
+- Čísla jde zadávat s desetinnou čárkou: pole jsou `type="text" inputmode="decimal"`, čárka se při
+  psaní mění na tečku a server (`toNum`) čárku přijme také.
 - Nastavení: Kč/kWh, příkon tiskárny, hranice „dochází“, výchozí hmotnost prázdné cívky, export DB.
 
 ## Fáze

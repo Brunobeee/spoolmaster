@@ -3,7 +3,8 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { costParams, db, getSettings, PRICE_PER_G, PRINT_SELECT, saveSettings, SETTINGS_DEFAULTS, SPOOL_SELECT, tx } from './db.js';
+import { costParams, db, getSettings, PRICE_PER_G, PRINT_SELECT, rateParams, saveSettings, SETTINGS_DEFAULTS, SPOOL_SELECT, tx } from './db.js';
+import { getRates, refreshRates, scheduleRateRefresh } from './rates.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -14,17 +15,22 @@ class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+// Čísla mohou přijít i s desetinnou čárkou („12,5“).
+const toNum = v => Number(typeof v === 'string' ? v.trim().replace(',', '.') : v);
+
 const SPOOL_FIELDS = ['brand', 'material', 'color_name', 'color_hex', 'diameter',
-  'initial_weight', 'spool_weight', 'price', 'location', 'notes', 'archived'];
+  'initial_weight', 'spool_weight', 'price', 'currency', 'location', 'notes', 'archived'];
 const NUMERIC = new Set(['diameter', 'initial_weight', 'spool_weight', 'price']);
+const CURRENCIES = ['USD', 'EUR', 'CZK'];
 
 function pickSpool(body) {
   const out = {};
   for (const f of SPOOL_FIELDS) {
     if (!(f in body)) continue;
     let v = body[f];
-    if (NUMERIC.has(f)) v = v === '' || v === null ? null : Number(v);
+    if (NUMERIC.has(f)) v = v === '' || v === null ? null : toNum(v);
     if (f === 'archived') v = v ? 1 : 0;
+    if (f === 'currency' && !CURRENCIES.includes(v)) throw new HttpError(400, 'Neplatná měna');
     if (NUMERIC.has(f) && v !== null && !Number.isFinite(v)) throw new HttpError(400, `Neplatná hodnota: ${f}`);
     out[f] = v;
   }
@@ -57,8 +63,8 @@ function loadPrints(where = '', params = {}) {
     SELECT u.id, u.print_id, u.spool_id, u.grams, s.brand, s.material, s.color_name, s.color_hex,
       ${PRICE_PER_G} AS price_per_g
     FROM print_usages u JOIN spools s ON s.id = u.spool_id
-    WHERE u.print_id IN (SELECT value FROM json_each(?))
-    ORDER BY u.id`).all(JSON.stringify(ids));
+    WHERE u.print_id IN (SELECT value FROM json_each($ids))
+    ORDER BY u.id`).all({ ...rateParams(), ids: JSON.stringify(ids) });
   const byPrint = Map.groupBy(usages, u => u.print_id);
   return prints.map(p => ({
     ...p,
@@ -77,7 +83,7 @@ function validateUsages(usages, allowEmpty = false) {
   if (allowEmpty && (usages == null || (Array.isArray(usages) && usages.length === 0))) return [];
   if (!Array.isArray(usages) || usages.length === 0) throw new HttpError(400, 'Tisk musí mít alespoň jednu cívku');
   return usages.map(u => {
-    const grams = Number(u.grams);
+    const grams = toNum(u.grams);
     const spool_id = Number(u.spool_id);
     if (!Number.isFinite(grams) || grams <= 0) throw new HttpError(400, 'Gramáž musí být kladné číslo');
     if (!db.prepare('SELECT 1 FROM spools WHERE id = ?').get(spool_id)) throw new HttpError(400, `Cívka #${spool_id} neexistuje`);
@@ -143,9 +149,9 @@ app.post('/api/spools/:id/adjust', (req, res) => {
   let target;
   if (req.body.gross !== undefined && req.body.gross !== '') {
     if (spool.spool_weight == null) throw new HttpError(400, 'Cívka nemá vyplněnou hmotnost prázdné cívky');
-    target = Number(req.body.gross) - spool.spool_weight;
+    target = toNum(req.body.gross) - spool.spool_weight;
   } else {
-    target = Number(req.body.remaining);
+    target = toNum(req.body.remaining);
   }
   if (!Number.isFinite(target)) throw new HttpError(400, 'Neplatná hmotnost');
   const delta = Math.round((target - spool.remaining) * 10) / 10;
@@ -176,7 +182,7 @@ app.get('/api/prints', (req, res) => {
 app.get('/api/prints/:id', (req, res) => res.json(getPrint(req.params.id)));
 
 function parsePercent(value) {
-  const percent = Number(value);
+  const percent = toNum(value);
   if (value === '' || value == null || !Number.isFinite(percent) || percent < 0 || percent > 100) {
     throw new HttpError(400, 'Vytištěno % musí být číslo 0–100');
   }
@@ -194,7 +200,7 @@ function pickPrint(body) {
 
   let duration_min = null;
   if (body.duration_min !== '' && body.duration_min != null) {
-    duration_min = Number(body.duration_min);
+    duration_min = toNum(body.duration_min);
     if (!Number.isFinite(duration_min) || duration_min < 0) throw new HttpError(400, 'Neplatný čas tisku');
   }
 
@@ -401,11 +407,21 @@ app.put('/api/settings', (req, res) => {
   const values = {};
   for (const key of Object.keys(SETTINGS_DEFAULTS)) {
     if (!(key in req.body)) continue;
-    const v = Number(req.body[key]);
+    const v = toNum(req.body[key]);
     if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Neplatná hodnota: ${key}`);
     values[key] = v;
   }
   res.json(saveSettings(values));
+});
+
+app.get('/api/rates', (req, res) => res.json(getRates()));
+
+app.post('/api/rates/refresh', async (req, res) => {
+  try {
+    res.json(await refreshRates());
+  } catch (err) {
+    throw new HttpError(502, `Kurzy ČNB se nepodařilo stáhnout: ${err.message}`);
+  }
 });
 
 // VACUUM INTO vytvoří konzistentní kopii i za běhu (včetně dat ještě ve WAL).
@@ -432,4 +448,5 @@ app.use((err, req, res, next) => {
 });
 
 const port = Number(process.env.PORT) || 3420;
+scheduleRateRefresh();
 app.listen(port, () => console.log(`SpoolMaster běží na http://localhost:${port}`));

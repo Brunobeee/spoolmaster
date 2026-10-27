@@ -1,7 +1,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { spools: [], allSpools: [], prints: [], planned: [], projects: [], settings: {}, tab: 'inventory' };
+const state = { spools: [], allSpools: [], prints: [], planned: [], projects: [], settings: {}, rates: {}, tab: 'inventory' };
 
 // --- Pomocné ---
 
@@ -25,13 +25,25 @@ const fmtG = g => {
 const fmtDate = d => new Date(d.length <= 10 ? d + 'T00:00' : d.replace(' ', 'T') + 'Z')
   .toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric' });
 const fmtKc = v => `${Math.round(v).toLocaleString('cs-CZ')} Kč`;
+// Ceny z API jsou v USD (hlavní měna); koruny jen orientačně podle aktuálního kurzu ČNB.
+const fmtUsd = v => `$${v.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const usdToCzk = v => v * (state.rates.USD ?? 0);
+const czkHint = v => state.rates.USD ? `≈ ${fmtKc(usdToCzk(v))}` : '';
+const CURRENCY_FMT = {
+  USD: v => fmtUsd(v),
+  EUR: v => `€${v.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+  CZK: v => `${v.toLocaleString('cs-CZ', { maximumFractionDigits: 2 })} Kč`,
+};
+const fmtPrice = (v, currency) => (CURRENCY_FMT[currency] ?? CURRENCY_FMT.USD)(v);
+// Kč za jednotku měny; koruny 1:1
+const czkPerUnit = currency => currency === 'CZK' ? 1 : state.rates[currency];
 const fmtDur = min => {
   const t = Math.round(min);
   const h = Math.floor(t / 60), m = t % 60;
   return h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`;
 };
 // null = cena některé cívky neznámá; nikdy ji neukazujeme jako 0 Kč
-const costText = (filament, energy) => filament == null ? 'cena neznámá' : fmtKc(filament) + (energy ? ` + ${fmtKc(energy)} el.` : '');
+const costText = (filament, energy) => filament == null ? 'cena neznámá' : fmtUsd(filament) + (energy ? ` + ${fmtUsd(energy)} el.` : '');
 const plural = (n, one, few, many) => n === 1 ? one : n >= 2 && n <= 4 ? few : many;
 const round1 = v => Math.round(v * 10) / 10;
 const today = () => new Date().toLocaleDateString('sv-SE');
@@ -55,7 +67,17 @@ function toast(msg, isError = false) {
 }
 
 for (const d of $$('dialog')) {
-  // Zavření dialogu kliknutím mimo obsah
+  // Desetinná čárka: číselná pole jsou textová s inputmode="decimal" (type=number se v Safari
+// a některých lokalizacích s čárkou neshodne), takže čárku při psaní převedeme na tečku.
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (!el.matches?.('input[inputmode="decimal"]') || !el.value.includes(',')) return;
+  const pos = el.selectionStart;
+  el.value = el.value.replace(/,/g, '.');
+  el.setSelectionRange(pos, pos);
+}, true);
+
+// Zavření dialogu kliknutím mimo obsah
   d.addEventListener('click', e => {
     const r = d.getBoundingClientRect();
     const outside = e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
@@ -100,11 +122,11 @@ async function loadStats() {
     <div class="stat"><div class="label">Filamentu skladem</div><div class="value num">${fmtG(s.totalRemaining)}</div></div>
     <div class="stat${s.lowCount ? ' warn' : ''}"><div class="label">Dochází (pod ${state.settings.low_threshold} g)</div><div class="value num">${s.lowCount}</div></div>
     <div class="stat"><div class="label">Spotřeba tento měsíc · ${m.prints} ${plural(m.prints, 'tisk', 'tisky', 'tisků')}</div>
-      <div class="value num">${fmtG(m.grams)}${m.cost > 0 ? ` <small>≈ ${fmtKc(m.cost)}</small>` : ''}</div></div>`;
+      <div class="value num">${fmtG(m.grams)}${m.cost > 0 ? ` <small>${fmtUsd(m.cost)}</small>` : ''}</div></div>`;
 }
 
 async function loadSettings() {
-  state.settings = await api('/settings');
+  [state.settings, state.rates] = await Promise.all([api('/settings'), api('/rates')]);
 }
 
 // Naplánované vykreslujeme až po načtení cívek (varování „nestačí“ potřebuje zůstatky).
@@ -176,7 +198,7 @@ function openFail(print) {
     <div class="fail-row">
       <span class="chip"><span class="dot" style="--c:${esc(u.color_hex)}"></span>${esc(u.color_name || u.material)}</span>
       <span class="hint num">z ${fmtG(u.grams)}</span>
-      <div class="unit-input" data-unit="g"><input type="number" step="0.1" min="0" required
+      <div class="unit-input" data-unit="g"><input type="text" inputmode="decimal" pattern="\\d*[.,]?\\d*" required
         data-spool="${u.spool_id}" data-planned="${u.grams}" aria-label="Gramy, ${esc(u.color_name || u.material)}"></div>
     </div>`).join('');
   setFailPercent(50);
@@ -348,12 +370,14 @@ async function openDetail(id) {
   const props = [
     ['Průměr', `${s.diameter} mm`],
     ['Prázdná cívka', s.spool_weight != null ? fmtG(s.spool_weight) : '—'],
-    ['Cena', s.price != null ? `${s.price.toLocaleString('cs-CZ')} Kč` : '—'],
+    ['Cena', s.price != null ? fmtPrice(s.price, s.currency) : '—'],
     ['Spotřebováno', fmtG(s.used)],
     ['Korekce', fmtG(s.adjusted)],
     ['Umístění', s.location || '—'],
   ];
-  if (s.price != null && s.initial_weight) props[2][1] += ` <small>(${(s.price / s.initial_weight * 1000).toFixed(0)} Kč/kg)</small>`;
+  if (s.price != null && s.initial_weight) {
+    props[2][1] += ` <small>(${fmtPrice(s.price / s.initial_weight * 1000, s.currency)}/kg${s.currency !== 'USD' ? `, ≈ ${fmtUsd(s.price * czkPerUnit(s.currency) / state.rates.USD)}` : ''})</small>`;
+  }
   const reserved = reservedLine(s);
 
   $('#detail-body').innerHTML = `
@@ -430,7 +454,7 @@ adjustDialog.addEventListener('close', async () => {
 // --- Projekty ---
 
 const failedText = p => (p.failed_grams > 0 || p.failed_cost > 0)
-  ? `z toho ${p.failed_cost != null ? fmtKc(p.failed_cost) : fmtG(p.failed_grams)} nepovedené` : '';
+  ? `z toho ${p.failed_cost != null ? fmtUsd(p.failed_cost) : fmtG(p.failed_grams)} nepovedené` : '';
 
 function renderProjects() {
   const showDone = $('#show-done').checked;
@@ -524,14 +548,15 @@ async function openProject(id) {
   const p = detailProject;
   const prints = [...p.prints].sort((a, b) =>
     (b.status === 'planned') - (a.status === 'planned') || b.printed_at.localeCompare(a.printed_at) || b.id - a.id);
-  const total = p.filament_cost == null ? 'cena neznámá' : fmtKc(p.filament_cost + (p.energy_cost ?? 0));
+  const totalUsd = p.filament_cost == null ? null : p.filament_cost + (p.energy_cost ?? 0);
+  const total = totalUsd == null ? 'cena neznámá' : `${fmtUsd(totalUsd)} <span class="hint">${czkHint(totalUsd)}</span>`;
   const props = [
     ['Gramáž', fmtG(p.grams)],
-    ['Filament', p.filament_cost != null ? fmtKc(p.filament_cost) : 'cena neznámá'],
-    ['Elektřina', p.energy_cost != null ? fmtKc(p.energy_cost) : '—'],
+    ['Filament', p.filament_cost != null ? fmtUsd(p.filament_cost) : 'cena neznámá'],
+    ['Elektřina', p.energy_cost != null ? fmtUsd(p.energy_cost) : '—'],
     ['Tisky', `${p.print_count}${p.planned_count ? ` + ${p.planned_count} naplánováno` : ''}`],
     ['Nepovedené', p.failed_grams > 0 || p.failed_cost > 0
-      ? `${fmtG(p.failed_grams)} · ${p.failed_cost != null ? fmtKc(p.failed_cost) : 'cena neznámá'}` : '—'],
+      ? `${fmtG(p.failed_grams)} · ${p.failed_cost != null ? fmtUsd(p.failed_cost) : 'cena neznámá'}` : '—'],
     ['Založen', p.created_at ? fmtDate(p.created_at) : '—'],
   ];
 
@@ -668,7 +693,7 @@ function addUsageRow(spoolId = null, grams = '') {
   row.className = 'usage-row';
   row.innerHTML = `
     <select name="spool_id" required>${spoolOptions(spoolId)}</select>
-    <div class="grams-input"><input name="grams" type="number" step="0.1" min="0.1" required placeholder="0" value="${grams}"></div>
+    <div class="grams-input"><input name="grams" type="text" inputmode="decimal" pattern="\\d*[.,]?\\d*" required placeholder="0" value="${grams}"></div>
     <button type="button" class="icon-btn" title="Odebrat" aria-label="Odebrat">×</button>
     <div class="after"></div>`;
   $('#usage-rows').append(row);
@@ -681,9 +706,13 @@ function durationValue() {
   return t > 0 ? t : null;
 }
 
+// Cena za gram v USD (stejný přepočet jako PRICE_PER_G na serveru).
 function pricePerG(spoolId) {
   const s = state.allSpools.find(s => s.id === spoolId);
-  if (s) return s.price != null && s.initial_weight ? s.price / s.initial_weight : null;
+  if (s) {
+    if (s.price == null || !s.initial_weight) return null;
+    return s.price * czkPerUnit(s.currency) / state.rates.USD / s.initial_weight;
+  }
   return editingPrint?.usages.find(u => u.spool_id === spoolId)?.price_per_g ?? null;
 }
 
@@ -692,7 +721,7 @@ function updateEstimate() {
   const percent = status === 'failed' ? Number(printForm.elements.percent.value) || 0 : 100;
   const minutes = durationValue();
   const { kwh_price = 0, printer_watts = 0 } = state.settings;
-  const energy = minutes != null ? minutes / 60 * printer_watts / 1000 * kwh_price * percent / 100 : null;
+  const energy = minutes != null ? minutes / 60 * printer_watts / 1000 * kwh_price / state.rates.USD * percent / 100 : null;
   let filament = 0, unknown = false, any = false;
   for (const row of $$('.usage-row', printForm)) {
     const id = Number($('select', row).value);
@@ -705,11 +734,11 @@ function updateEstimate() {
   }
   const el = $('#print-estimate');
   el.classList.toggle('unknown', unknown);
-  if (!any) { el.textContent = energy != null ? `≈ ${fmtKc(energy)} elektřina` : ''; return; }
-  const energyText = energy != null ? `${fmtKc(energy)} elektřina` : '';
+  if (!any) { el.textContent = energy != null ? `≈ ${fmtUsd(energy)} elektřina` : ''; return; }
+  const energyText = energy != null ? `${fmtUsd(energy)} elektřina` : '';
   el.textContent = unknown
     ? `Cena filamentu neznámá${energyText ? ` · ≈ ${energyText}` : ''}`
-    : `≈ ${fmtKc(filament)} filament${energyText ? ` + ${energyText}` : ''}`;
+    : `≈ ${fmtUsd(filament)} filament${energyText ? ` + ${energyText}` : ''} (${czkHint(filament + (energy ?? 0))})`;
 }
 
 function updateUsageInfo() {
@@ -837,11 +866,29 @@ $('[data-action="delete"]', printForm).addEventListener('click', async () => {
 const settingsDialog = $('#settings-dialog');
 const settingsForm = $('#settings-form');
 
+function renderRates() {
+  const r = state.rates;
+  const fmt = v => v.toLocaleString('cs-CZ', { maximumFractionDigits: 3 });
+  $('#rates-info').innerHTML = r.source === 'cnb'
+    ? `Kurz ČNB k ${fmtDate(r.date)}: 1 USD = ${fmt(r.USD)} Kč, 1 EUR = ${fmt(r.EUR)} Kč`
+    : `Kurz ČNB se zatím nepodařilo stáhnout, počítá se orientačně (1 USD = ${fmt(r.USD)} Kč, 1 EUR = ${fmt(r.EUR)} Kč).`;
+}
+
 $('#open-settings').addEventListener('click', () => {
   for (const [key, value] of Object.entries(state.settings)) {
     if (settingsForm.elements[key]) settingsForm.elements[key].value = value;
   }
+  renderRates();
   settingsDialog.showModal();
+});
+
+$('#refresh-rates').addEventListener('click', async () => {
+  try {
+    state.rates = await api('/rates/refresh', { method: 'POST' });
+    renderRates();
+    toast('Kurzy aktualizovány');
+    await refresh();
+  } catch (err) { toast(err.message, true); }
 });
 
 settingsDialog.addEventListener('close', async () => {

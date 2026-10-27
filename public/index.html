@@ -65,10 +65,10 @@
         <label>Materiál <input name="material" required placeholder="PLA" list="material-list"></label>
         <label>Název barvy <input name="color_name" placeholder="Galaxy Black"></label>
         <label>Barva <input name="color_hex" type="color" value="#e8743b"></label>
-        <label>Hmotnost filamentu (g) <input name="initial_weight" type="number" step="1" min="0" value="1000" required></label>
-        <label>Prázdná cívka (g) <input name="spool_weight" type="number" step="1" min="0" placeholder="např. 200"></label>
+        <label>Hmotnost filamentu (g) <input name="initial_weight" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" value="1000" required></label>
+        <label>Prázdná cívka (g) <input name="spool_weight" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" placeholder="např. 200"></label>
         <label>Průměr (mm) <select name="diameter"><option>1.75</option><option>2.85</option></select></label>
-        <label>Cena (Kč) <input name="price" type="number" step="1" min="0"></label>
+        <label>Cena <span class="price-input"><input name="price" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" placeholder="24.99"><select name="currency" aria-label="Měna"><option value="USD">$ USD</option><option value="EUR">€ EUR</option><option value="CZK">Kč</option></select></span></label>
         <label class="span-2">Umístění <input name="location" placeholder="Box A, AMS slot 2…"></label>
         <label class="span-2">Poznámka <textarea name="notes" rows="2"></textarea></label>
       </div>
@@ -97,7 +97,7 @@
         <label><input type="radio" name="mode" value="gross" checked> Váha s cívkou</label>
         <label><input type="radio" name="mode" value="remaining"> Čistý zbytek</label>
       </div>
-      <label>Hmotnost (g) <input name="value" type="number" step="0.1" min="0" required autofocus></label>
+      <label>Hmotnost (g) <input name="value" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" required autofocus></label>
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="button" class="btn" data-close>Zrušit</button>
@@ -118,13 +118,13 @@
       <div class="grid-2">
         <label class="span-2">Název <input name="name" required placeholder="Držák na sluchátka"></label>
         <label data-unless="planned">Datum <input name="printed_at" type="date" required></label>
-        <label data-when="failed">Vytištěno % <input name="percent" type="number" min="0" max="100" step="1"></label>
+        <label data-when="failed">Vytištěno % <input name="percent" type="text" inputmode="decimal" pattern="\d*[.,]?\d*"></label>
         <label>Projekt <select name="project_id"></select></label>
         <div class="field">
           <span id="duration-label">Čas tisku</span>
           <div class="duration" role="group" aria-labelledby="duration-label">
-            <div class="unit-input" data-unit="h"><input name="dur_h" type="number" min="0" step="1" placeholder="0" aria-label="Hodiny"></div>
-            <div class="unit-input" data-unit="min"><input name="dur_m" type="number" min="0" max="59" step="1" placeholder="0" aria-label="Minuty"></div>
+            <div class="unit-input" data-unit="h"><input name="dur_h" type="text" inputmode="numeric" pattern="\d*" placeholder="0" aria-label="Hodiny"></div>
+            <div class="unit-input" data-unit="min"><input name="dur_m" type="text" inputmode="numeric" pattern="\d*" placeholder="0" aria-label="Minuty"></div>
           </div>
         </div>
       </div>
@@ -154,7 +154,7 @@
         <span id="fail-percent-label">Vytištěno %</span>
         <div class="percent-row" role="group" aria-labelledby="fail-percent-label">
           <input type="range" name="percent_range" min="0" max="100" step="1" value="50" aria-label="Vytištěno procent">
-          <div class="unit-input" data-unit="%"><input name="percent" type="number" min="0" max="100" step="1" value="50" required aria-label="Vytištěno procent"></div>
+          <div class="unit-input" data-unit="%"><input name="percent" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" value="50" required aria-label="Vytištěno procent"></div>
         </div>
       </div>
       <fieldset>
@@ -196,12 +196,18 @@
     <form method="dialog" id="settings-form">
       <h2>Nastavení</h2>
       <div class="grid-2">
-        <label>Hranice „dochází“ (g) <input name="low_threshold" type="number" step="1" min="0" required></label>
-        <label>Výchozí prázdná cívka (g) <input name="default_spool_weight" type="number" step="1" min="0" required></label>
-        <label>Cena elektřiny (Kč/kWh) <input name="kwh_price" type="number" step="0.01" min="0" required></label>
-        <label>Průměrný příkon tiskárny (W) <input name="printer_watts" type="number" step="1" min="0" required></label>
+        <label>Hranice „dochází“ (g) <input name="low_threshold" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" required></label>
+        <label>Výchozí prázdná cívka (g) <input name="default_spool_weight" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" required></label>
+        <label>Cena elektřiny (Kč/kWh) <input name="kwh_price" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" required></label>
+        <label>Průměrný příkon tiskárny (W) <input name="printer_watts" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" required></label>
       </div>
-      <p class="hint">Elektřina se počítá z času tisku.</p>
+      <p class="hint">Elektřina se počítá z času tisku a přepočítá se na dolary.</p>
+      <fieldset>
+        <legend>Měna</legend>
+        <p class="hint">Ceny se počítají v dolarech, koruny jsou orientační přepočet.</p>
+        <p class="hint" id="rates-info"></p>
+        <button type="button" class="btn small" id="refresh-rates">Obnovit kurz</button>
+      </fieldset>
       <fieldset>
         <legend>Záloha</legend>
         <p class="hint">Stáhne kompletní databázi (cívky, tisky, nastavení) jako soubor SQLite.</p>

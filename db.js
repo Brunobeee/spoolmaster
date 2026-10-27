@@ -99,6 +99,18 @@ const MIGRATIONS = [
   CREATE INDEX idx_prints_project ON prints(project_id);
   CREATE INDEX idx_prints_status ON prints(status);
   `,
+  // Měna ceny cívky (hlavní je USD). Ceny zadané před touto migrací byly v Kč.
+  `
+  ALTER TABLE spools ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD' CHECK (currency IN ('USD', 'EUR', 'CZK'));
+  UPDATE spools SET currency = 'CZK' WHERE price IS NOT NULL;
+
+  CREATE TABLE exchange_rates (
+    currency     TEXT PRIMARY KEY,
+    czk_per_unit REAL NOT NULL,
+    rate_date    TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL
+  );
+  `,
 ];
 
 // Cizí klíče se vypínají před transakcí (uvnitř je pragma bez účinku), aby šly přestavět
@@ -138,16 +150,19 @@ export const SPOOL_SELECT = `
   ) s
 `;
 
-// Cena za gram; NULL, když cívka nemá cenu.
-export const PRICE_PER_G = 'CASE WHEN s.price IS NULL OR s.initial_weight <= 0 THEN NULL ELSE s.price / s.initial_weight END';
+// Cena za gram v USD (přepočet kurzem ČNB); NULL, když cívka nemá cenu.
+// Parametry $rate_usd a $rate_eur = Kč za jednotku, viz rateParams().
+export const PRICE_PER_G = `CASE WHEN s.price IS NULL OR s.initial_weight <= 0 THEN NULL
+  ELSE s.price * (CASE s.currency WHEN 'USD' THEN 1.0 WHEN 'EUR' THEN $rate_eur / $rate_usd ELSE 1.0 / $rate_usd END)
+    / s.initial_weight END`;
 
-// Tisk s gramáží a cenou. Cena filamentu je NULL, když některá cívka nemá cenu;
-// elektřina NULL bez duration_min. Parametry $kwh_price a $printer_watts viz costParams().
+// Tisk s gramáží a cenou v USD. Cena filamentu je NULL, když některá cívka nemá cenu;
+// elektřina (cena kWh je v Kč) NULL bez duration_min. Parametry viz costParams().
 export const PRINT_SELECT = `
   SELECT p.*, pj.name AS project_name,
     COALESCE(c.grams, 0) AS grams,
     CASE WHEN c.unknown > 0 THEN NULL ELSE COALESCE(c.cost, 0) END AS filament_cost,
-    p.duration_min / 60.0 * $printer_watts / 1000.0 * $kwh_price * p.percent / 100.0 AS energy_cost
+    p.duration_min / 60.0 * $printer_watts / 1000.0 * $kwh_price / $rate_usd * p.percent / 100.0 AS energy_cost
   FROM prints p
   LEFT JOIN projects pj ON pj.id = p.project_id
   LEFT JOIN (
@@ -174,6 +189,8 @@ migrate();
 
 // --- Nastavení ---
 
+export const RATE_FALLBACK = { USD: 22, EUR: 25 };
+
 export const SETTINGS_DEFAULTS = {
   kwh_price: 6,              // Kč za kWh
   printer_watts: 150,        // průměrný příkon tiskárny ve W
@@ -187,10 +204,17 @@ export function getSettings() {
   return { ...SETTINGS_DEFAULTS, ...stored };
 }
 
-// Pojmenované parametry pro PRINT_SELECT (čtou se živě z nastavení).
+// Pojmenované parametry pro PRICE_PER_G a PRINT_SELECT (čtou se živě z nastavení a kurzů).
+// Kurzy se čtou přímo z tabulky, aby db.js nezávisel na rates.js (ten importuje db).
+export function rateParams() {
+  const rows = db.prepare('SELECT currency, czk_per_unit FROM exchange_rates').all();
+  const r = Object.fromEntries(rows.map(x => [x.currency, x.czk_per_unit]));
+  return { rate_usd: r.USD ?? RATE_FALLBACK.USD, rate_eur: r.EUR ?? RATE_FALLBACK.EUR };
+}
+
 export function costParams() {
   const { kwh_price, printer_watts } = getSettings();
-  return { kwh_price, printer_watts };
+  return { kwh_price, printer_watts, ...rateParams() };
 }
 
 export function saveSettings(values) {
