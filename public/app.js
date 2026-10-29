@@ -99,6 +99,8 @@ const imageDialog = $('#image-dialog');
 const bigImage = $('img', imageDialog);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let zoomedThumb = null;
+// Zvětšený náhled si pozadí rozplývá sám, závoj (syncVeil) by po něm zbytečně znovu ztmavil.
+let zoomJustClosed = false;
 
 // Transformace, která velký obrázek posune a zmenší přesně na místo malého náhledu.
 function thumbTransform(thumb) {
@@ -130,6 +132,7 @@ function closeZoom() {
   const done = () => {
     if (!imageDialog.classList.contains('closing')) return;
     anim?.cancel();
+    zoomJustClosed = true;
     imageDialog.close();
     imageDialog.classList.remove('closing');
     if (thumb) thumb.style.visibility = '';
@@ -157,7 +160,23 @@ imageDialog.addEventListener('click', closeZoom);
 imageDialog.addEventListener('cancel', e => { e.preventDefault(); closeZoom(); });
 imageDialog.addEventListener('close', () => { if (zoomedThumb) zoomedThumb.style.visibility = ''; });
 
+// Závoj: po zavření posledního okna zatmavení chvíli zůstane a pak plynule zmizí. Když se mezitím
+// otevře další okno (třeba až po načtení dat), nevznikne mezi okny probliknutí holé stránky.
+const veil = $('#veil');
+let veilTimer;
+let anyDialogOpen = false;
+function syncVeil() {
+  const open = !!document.querySelector('dialog[open]');
+  if (open === anyDialogOpen) return;
+  anyDialogOpen = open;
+  clearTimeout(veilTimer);
+  if (open || zoomJustClosed) { zoomJustClosed = false; veil.className = ''; return; }
+  veil.className = 'on';
+  veilTimer = setTimeout(() => { veil.className = 'fading'; }, 120);
+}
+
 new MutationObserver(() => {
+  syncVeil();
   // Dialog otevřený až po bublině (např. znovu po chybě uložení) by ji jinak překryl.
   const el = $('#toast');
   if (el.matches(':popover-open')) { el.hidePopover(); el.showPopover(); }
@@ -495,7 +514,8 @@ function openGroup(list) {
 
 groupDialog.addEventListener('click', e => {
   const row = e.target.closest('[data-spool]');
-  if (row) { groupDialog.close(); return openDetail(Number(row.dataset.spool)); }
+  // Okno skupiny se zavře až po otevření detailu, jinak by mezi nimi (během načítání) probliklo pozadí.
+  if (row) return openDetail(Number(row.dataset.spool)).then(() => groupDialog.close());
   if (e.target.closest('[data-act="duplicate"]')) { groupDialog.close(); openDuplicate(openedGroup[0]); }
 });
 

@@ -242,6 +242,13 @@ dialog {
   background: var(--surface); color: var(--text); box-shadow: 0 20px 60px rgb(0 0 0 / .25);
 }
 dialog::backdrop { background: rgb(20 18 15 / .45); backdrop-filter: blur(2px); }
+/* Závoj se stejným vzhledem jako pozadí dialogu, viz syncVeil v app.js. */
+#veil {
+  position: fixed; inset: 0; z-index: 40; pointer-events: none; opacity: 0;
+  background: rgb(20 18 15 / .45); backdrop-filter: blur(2px);
+}
+#veil.on { opacity: 1; }
+#veil.fading { opacity: 0; transition: opacity .18s ease-out; }
 dialog[open] { animation: pop .18s cubic-bezier(.2, .9, .3, 1.2); }
 @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } }
 form { display: flex; flex-direction: column; gap: 14px; }

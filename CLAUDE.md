@@ -98,6 +98,9 @@ zůstatku převážením cívky.
 - Hotovo jde 6 s vrátit tlačítkem Zpět v bublině (`undoDone` = PUT zpět na planned).
 - Pod otevřeným dialogem je stránka zamčená jen CSS (`html:has(dialog[open]) { overflow: hidden }`).
   Zafixování body (`position: fixed`) nepoužívat – posune přilepenou horní lištu a stránka problikne.
+- Přechod mezi okny: nové okno otevírat před zavřením starého (detail ze skupiny). Pro asynchronní
+  přechody (načtení dat) drží zatmavení `#veil` (`syncVeil`) – po zavření posledního okna chvíli zůstane
+  a pak zmizí, takže mezi okny neprobliká holá stránka.
 - Po návratu do aplikace (visibilitychange, min. 30 s) se data načtou znovu, pokud není otevřený dialog.
 
 ## Import 3MF (`threemf.js`, `POST /api/files`, `POST /api/prints/import`)
