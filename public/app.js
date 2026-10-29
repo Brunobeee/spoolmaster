@@ -157,8 +157,25 @@ imageDialog.addEventListener('click', closeZoom);
 imageDialog.addEventListener('cancel', e => { e.preventDefault(); closeZoom(); });
 imageDialog.addEventListener('close', () => { if (zoomedThumb) zoomedThumb.style.visibility = ''; });
 
-// Dialog otevřený až po bublině (např. znovu po chybě uložení) by ji jinak překryl.
+// Pod otevřeným dialogem se stránka nesmí posouvat. iOS Safari overflow: hidden ignoruje,
+// proto se body zafixuje na aktuální pozici a po zavření posledního dialogu se pozice vrátí.
+let lockedScrollY = null;
+function syncScrollLock() {
+  const anyOpen = !!document.querySelector('dialog[open]');
+  const body = document.body.style;
+  if (anyOpen && lockedScrollY === null) {
+    lockedScrollY = scrollY;
+    Object.assign(body, { position: 'fixed', top: `-${lockedScrollY}px`, left: '0', right: '0' });
+  } else if (!anyOpen && lockedScrollY !== null) {
+    Object.assign(body, { position: '', top: '', left: '', right: '' });
+    scrollTo(0, lockedScrollY);
+    lockedScrollY = null;
+  }
+}
+
 new MutationObserver(() => {
+  syncScrollLock();
+  // Dialog otevřený až po bublině (např. znovu po chybě uložení) by ji jinak překryl.
   const el = $('#toast');
   if (el.matches(':popover-open')) { el.hidePopover(); el.showPopover(); }
 }).observe(document.body, { subtree: true, attributeFilter: ['open'] });

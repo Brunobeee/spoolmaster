@@ -35,6 +35,8 @@
 [hidden] { display: none !important; }
 html {
   -webkit-text-size-adjust: 100%;
+  /* Místo pro posuvník zůstává, takže zamčení stránky pod dialogem nehne rozvržením. */
+  scrollbar-gutter: stable;
   /* Šedý záblesk po klepnutí prozrazuje web; zpětnou vazbu dávají :active stavy. */
   -webkit-tap-highlight-color: transparent;
 }

@@ -96,6 +96,8 @@ zůstatku převážením cívky.
 - Na telefonu (≤640 px): statistiky a fronta jen na záložce Inventář, dialogy u horního okraje s
   přilepenými akcemi dole, bublina nahoře, dotykové plochy ≥44 px, `env(safe-area-inset-*)`.
 - Hotovo jde 6 s vrátit tlačítkem Zpět v bublině (`undoDone` = PUT zpět na planned).
+- Pod otevřeným dialogem je stránka zamčená (`syncScrollLock`: body `position: fixed` na aktuální
+  pozici, iOS jinak `overflow: hidden` ignoruje); po zavření posledního dialogu se pozice vrátí.
 - Po návratu do aplikace (visibilitychange, min. 30 s) se data načtou znovu, pokud není otevřený dialog.
 
 ## Import 3MF (`threemf.js`, `POST /api/files`, `POST /api/prints/import`)
