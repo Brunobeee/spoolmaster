@@ -47,7 +47,9 @@ button, .btn, a, label, select, [role="tab"], summary {
 button, .btn, [role="tab"], .segmented label, label.check, .chip, .tag {
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
-/* Rolování uvnitř dialogu nepřetéká na stránku pod ním. */
+/* Pod otevřeným dialogem se stránka neposouvá a rolování dialogu na ni nepřetéká.
+   Jen overflow na kořeni – zafixování body by posunulo přilepenou horní lištu a stránka by problikla. */
+html:has(dialog[open]) { overflow: hidden; }
 dialog { overscroll-behavior: contain; }
 body {
   margin: 0;
