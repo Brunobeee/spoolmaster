@@ -64,18 +64,32 @@ const fmtSize = b => b >= 1e6 ? `${(b / 1e6).toLocaleString('cs-CZ', { maximumFr
 // Bublina je popover, takže je v top layer nad modálními dialogy (z-index na ně nestačí).
 // Při každém zobrazení se znovu otevře, aby skončila nad naposledy otevřeným dialogem.
 let toastTimer;
-function toast(msg, isError = false) {
+// action = { label, run }: tlačítko v bublině (např. Zpět); bublina pak vydrží déle a jde na ni klepnout.
+function toast(msg, isError = false, action = null) {
   const el = $('#toast');
   el.textContent = msg;
   el.classList.toggle('error', isError);
+  el.classList.toggle('has-action', !!action);
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => { hideToast(); action.run(); }, { once: true });
+    el.append(btn);
+  }
   if (el.matches(':popover-open')) el.hidePopover();
   el.showPopover();
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    el.classList.remove('show');
-    toastTimer = setTimeout(() => el.hidePopover(), 200);
-  }, 2800);
+  toastTimer = setTimeout(hideToast, action ? 6000 : 2800);
+}
+
+function hideToast() {
+  const el = $('#toast');
+  clearTimeout(toastTimer);
+  el.classList.remove('show');
+  toastTimer = setTimeout(() => el.hidePopover(), 200);
 }
 
 // Náhled modelu jde rozkliknout. Zachytává se už ve fázi capture, aby klik neotevřel i řádek
@@ -266,10 +280,24 @@ $('#planned').addEventListener('click', async e => {
   done.disabled = true;
   try {
     const p = await api(`/prints/${print.id}/complete`, { method: 'POST', body: { status: 'ok' } });
-    toast(`Hotovo · odečteno ${fmtG(printGrams(p))}`);
+    // Hotovo je jedno klepnutí vedle Selhalo — omyl jde chvíli vrátit zpět do fronty.
+    toast(`Hotovo · odečteno ${fmtG(printGrams(p))}`, false, { label: 'Zpět', run: () => undoDone(print) });
     await refresh();
   } catch (err) { toast(err.message, true); done.disabled = false; }
 });
+
+async function undoDone(print) {
+  try {
+    await api(`/prints/${print.id}`, { method: 'PUT', body: {
+      name: print.name, printed_at: print.printed_at, status: 'planned', percent: 100,
+      duration_min: print.duration_min, project_id: print.project_id, notes: print.notes,
+      file_id: print.file_id, plate_index: print.plate_index,
+      usages: print.usages.map(u => ({ spool_id: u.spool_id, grams: u.grams })),
+    } });
+    toast('Vráceno do fronty');
+    await refresh();
+  } catch (err) { toast(err.message, true); }
+}
 
 // --- Selhalo ---
 
@@ -880,7 +908,8 @@ function spoolOptions(selectedId) {
     // u.id je id řádku spotřeby, ne cívky — proto id až za spread.
     if (u) list.push({ ...u, id: selectedId, remaining: NaN });
   }
-  const label = s => esc(spoolLabel(s))
+  // Barva první: na úzkém displeji je vidět jen začátek textu a podle barvy se cívky rozlišují.
+  const label = s => esc([s.color_name, s.material, s.brand].filter(Boolean).join(' · '))
     + (Number.isFinite(s.remaining) ? ` (${fmtG(s.remaining)}${s.inGroup ? (isOpened(s) ? ', načatá' : ', neotevřená') : ''})`
       : ' (dotištěná / v archivu)');
   return '<option value="">— vyberte cívku —</option>' + list.map(s =>
@@ -1702,7 +1731,9 @@ settingsDialog.addEventListener('close', async () => {
 const TABS = ['inventory', 'projects', 'prints'];
 
 function setTab(tab) {
+  if (state.tab !== tab) scrollTo(0, 0);
   state.tab = tab;
+  document.body.dataset.tab = tab;
   for (const b of $$('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
   for (const t of TABS) $(`#tab-${t}`).hidden = t !== tab;
   history.replaceState(null, '', `#${tab}`);
@@ -1713,3 +1744,14 @@ addEventListener('hashchange', tabFromHash);
 tabFromHash();
 
 loadSettings().then(refresh).catch(err => toast(err.message, true));
+
+// Aplikace na ploše se po návratu jen „probudí“ ve stavu, ve kterém zůstala. Data mezitím mohlo
+// změnit jiné zařízení (třeba import na Macu), proto se po návratu načtou znovu — ne ale
+// uprostřed rozepsaného formuláře.
+let lastRefresh = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || Date.now() - lastRefresh < 30_000) return;
+  if ($$('dialog[open]').length) return;
+  lastRefresh = Date.now();
+  refresh().catch(() => {});
+});

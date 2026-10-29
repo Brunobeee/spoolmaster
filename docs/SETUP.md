@@ -32,6 +32,13 @@ Data (databáze, nahrané 3MF soubory a jejich náhledy v `data/files/`) jsou ve
 uvnitř projektové složky.
 Tu zahrň do zálohy NASu. Rychlou ruční zálohu stáhneš v aplikaci přes **Nastavení → Exportovat databázi**.
 
+### Aplikace na ploše telefonu
+
+- **iPhone:** v Safari otevři `http://<IP-NASu>:3420` → Sdílet → **Přidat na plochu**.
+- **Android:** v Chromu ⋮ → **Přidat na plochu**. Jako samostatná aplikace (bez lišty prohlížeče)
+  se otevře jen přes HTTPS – na UGOS jde zapnout reverzní proxy s certifikátem. Přes `http://`
+  vznikne zástupce, který se otevře v Chromu.
+
 ### Aktualizace
 
 1. Push do `main` → počkej, až doběhne GitHub Action „Docker image“.

@@ -85,7 +85,18 @@ zůstatku převážením cívky.
 1. ✅ Docker + GitHub Actions + nasazení na NAS, verzované migrace, Nastavení
 2. ✅ Projekty, fronta naplánovaných tisků, cena (filament + elektřina), rezervace
 3. ✅ Import 3MF (podložky, gramáž, čas, náhledy), párování s cívkami, „vytisknout znovu“
-4. PWA (manifest + ikona, bez offline) a doladění mobilu
+4. ✅ PWA (manifest + ikona, bez offline) a doladění mobilu
+
+## Mobil a PWA
+- `public/manifest.webmanifest` + `public/icons/` (zdroj `icon.svg`, PNG 512/192/180/32 vyrenderované
+  z něj; obsah drží bezpečnou zónu maskovatelné ikony). Bez service workeru – offline se nepodporuje.
+- Na Androidu se aplikace otevře bez lišty prohlížeče jen přes HTTPS; přes `http://` adresu NASu
+  vznikne obyčejný zástupce. iPhone (Safari → Přidat na plochu) funguje i přes http.
+- Hover pravidla jen v `@media (hover: hover) and (pointer: fine)`; dotyk má `:active` odezvu.
+- Na telefonu (≤640 px): statistiky a fronta jen na záložce Inventář, dialogy u horního okraje s
+  přilepenými akcemi dole, bublina nahoře, dotykové plochy ≥44 px, `env(safe-area-inset-*)`.
+- Hotovo jde 6 s vrátit tlačítkem Zpět v bublině (`undoDone` = PUT zpět na planned).
+- Po návratu do aplikace (visibilitychange, min. 30 s) se data načtou znovu, pokud není otevřený dialog.
 
 ## Import 3MF (`threemf.js`, `POST /api/files`, `POST /api/prints/import`)
 - Rozbaluje se jen `Metadata/*.config` a náhledy podložek (projekty mají i 380MB model uvnitř).

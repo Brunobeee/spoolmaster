@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Plné pozadí bez průhlednosti: iOS i maskovatelné ikony Androidu si tvar ořízne samy. -->
+  <rect width="512" height="512" fill="#1f1d1a"/>
+  <!-- Obsah drží v bezpečné zóně maskovatelné ikony (kruh o poloměru ~205 px). -->
+  <circle cx="256" cy="256" r="196" fill="#2c2925"/>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#4a453e" stroke-width="10"/>
+  <circle cx="256" cy="256" r="138" fill="none" stroke="#e8743b" stroke-width="88"/>
+  <!-- Soustředné závity navinutého filamentu -->
+  <g fill="none" stroke="#c95f2c" stroke-width="3" opacity=".55">
+    <circle cx="256" cy="256" r="110"/><circle cx="256" cy="256" r="128"/>
+    <circle cx="256" cy="256" r="146"/><circle cx="256" cy="256" r="164"/>
+  </g>
+  <circle cx="256" cy="256" r="88" fill="#2c2925"/>
+  <circle cx="256" cy="256" r="88" fill="none" stroke="#4a453e" stroke-width="8"/>
+  <circle cx="256" cy="256" r="28" fill="#1f1d1a"/>
+</svg>

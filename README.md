@@ -49,7 +49,8 @@ filamentu tento měsíc prošlo tiskárnou.
 - ⚠️ **Upozornění, že dochází**: cívky pod nastavenou hranicí jsou vidět na první pohled.
 - 📊 **Přehled**: kolik máš skladem, kolik dochází a kolik se spotřebovalo tento měsíc.
 - 💾 **Záloha jedním klikem**: export celé databáze ke stažení.
-- 📱 **Funguje na mobilu**: zápis přímo u tiskárny.
+- 📱 **Aplikace v telefonu**: přidáš si ji na plochu a otevírá se přes celou obrazovku jako
+  normální aplikace. Hotovo/Selhalo u tiskárny jedním klepnutím, omylem potvrzený tisk jde vrátit.
 
 ## Kam to směřuje
 
@@ -58,7 +59,7 @@ filamentu tento měsíc prošlo tiskárnou.
 | 1 | Docker image pro NAS, migrace databáze, nastavení | ✅ hotovo |
 | 2 | Projekty, fronta naplánovaných tisků, cena tisku (filament + elektřina) | ✅ hotovo |
 | 3 | Import 3MF z Bambu Studia: gramáž po filamentech, náhled, „vytisknout znovu“ | ✅ hotovo |
-| 4 | Ikona na plochu mobilu (PWA) a doladění mobilu | 🔜 další |
+| 4 | Ikona na plochu mobilu (PWA) a doladění mobilu | ✅ hotovo |
 
 Postup: po slicování uložíš projekt, nahraješ 3MF na počítači a tisk se sám zařadí do fronty se
 správnou gramáží i časem. Po dotisku na mobilu klepneš **Hotovo** nebo **Selhalo**.

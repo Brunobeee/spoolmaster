@@ -33,7 +33,20 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Šedý záblesk po klepnutí prozrazuje web; zpětnou vazbu dávají :active stavy. */
+  -webkit-tap-highlight-color: transparent;
+}
+/* Ovládací prvky: okamžitý klik bez čekání na dvojité klepnutí a bez výběru textu při podržení. */
+button, .btn, a, label, select, [role="tab"], summary {
+  touch-action: manipulation;
+}
+button, .btn, [role="tab"], .segmented label, label.check, .chip, .tag {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+/* Rolování uvnitř dialogu nepřetéká na stránku pod ním. */
+dialog { overscroll-behavior: contain; }
 body {
   margin: 0;
   background: var(--bg);
@@ -47,7 +60,11 @@ h2 { margin: 0 0 16px; font-size: 1.25rem; }
 .topbar {
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; gap: 16px;
-  padding: 12px max(16px, calc((100vw - 1200px) / 2));
+  /* Bezpečné okraje kvůli výřezu displeje (viewport-fit=cover), hlavně na šířku. */
+  padding: calc(12px + env(safe-area-inset-top, 0px))
+    max(16px, calc((100vw - 1200px) / 2), env(safe-area-inset-right, 0px))
+    12px
+    max(16px, calc((100vw - 1200px) / 2), env(safe-area-inset-left, 0px));
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
@@ -61,7 +78,10 @@ h2 { margin: 0 0 16px; font-size: 1.25rem; }
 }
 .tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 
-main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 64px; }
+main {
+  max-width: 1200px; margin: 0 auto;
+  padding: 20px max(16px, env(safe-area-inset-right, 0px)) calc(64px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
 
 /* --- Tlačítka a formuláře --- */
 .btn {
@@ -70,12 +90,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 64px; }
   font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 9px; cursor: pointer;
   white-space: nowrap; transition: background .15s, border-color .15s, transform .1s;
 }
-.btn:hover { border-color: color-mix(in srgb, var(--text) 25%, var(--border)); }
 .btn:active { transform: scale(.97); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
 .btn.ghost { background: none; border-color: transparent; }
-.btn.ghost:hover { background: var(--surface-2); }
 .btn.danger { color: var(--danger); }
 .btn.small { padding: 5px 10px; font-size: .9rem; }
 .btn.icon { padding: 7px; color: var(--muted); }
@@ -125,7 +142,6 @@ label.check { flex-direction: row; align-items: center; gap: 6px; white-space: n
   background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);
   border-radius: var(--radius); padding: 12px 14px; cursor: pointer; transition: box-shadow .15s;
 }
-.planned-item:hover { box-shadow: var(--shadow); }
 .planned-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .planned-name { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; text-align: left; border-radius: 4px; }
 .planned-name:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
@@ -133,9 +149,7 @@ label.check { flex-direction: row; align-items: center; gap: 6px; white-space: n
 .planned-actions { display: flex; gap: 8px; flex: none; }
 .planned-actions .btn { min-height: 40px; justify-content: center; }
 .btn.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
-.btn.ok:hover { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); }
 .planned-actions .btn.danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
-.planned-actions .btn.danger:hover { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
 .btn:disabled { opacity: .55; cursor: progress; }
 
 /* --- Cívky --- */
@@ -146,7 +160,6 @@ label.check { flex-direction: row; align-items: center; gap: 6px; white-space: n
   padding: 14px; cursor: pointer; text-align: left; font: inherit; color: inherit;
   transition: border-color .15s, box-shadow .15s;
 }
-.spool:hover { border-color: color-mix(in srgb, var(--spool) 50%, var(--border)); box-shadow: var(--shadow); }
 .spool.low { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .spool.empty { opacity: .6; }
 
@@ -191,7 +204,6 @@ label.check { flex-direction: row; align-items: center; gap: 6px; white-space: n
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 12px 16px; cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%;
 }
-.print:hover { box-shadow: var(--shadow); }
 .print .name { font-weight: 600; }
 .print .date { color: var(--muted); font-size: .85rem; }
 .print .grams { font-weight: 650; text-align: right; grid-row: span 2; }
@@ -212,7 +224,6 @@ label.check { flex-direction: row; align-items: center; gap: 6px; white-space: n
   padding: 14px 16px; cursor: pointer; text-align: left; font: inherit; color: inherit;
   transition: border-color .15s, box-shadow .15s;
 }
-.project:hover { box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .project.done { opacity: .7; }
 .project .title { font-weight: 600; overflow-wrap: anywhere; }
 .project-nums .weight { font-size: 1.15rem; font-weight: 650; }
@@ -245,7 +256,6 @@ legend { color: var(--muted); font-size: .88rem; padding: 0 4px; }
 .usage-row .after { grid-column: 1 / -1; font-size: .8rem; color: var(--muted); margin-top: -4px; }
 .usage-row .after.neg { color: var(--danger); }
 .icon-btn { border: 0; background: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; border-radius: 6px; height: 32px; }
-.icon-btn:hover { background: var(--surface-2); color: var(--danger); }
 .usage-total { margin: 0; text-align: right; font-weight: 600; }
 .usage-total:empty, .estimate:empty { display: none; }
 .estimate { margin: 0; font-weight: 600; }
@@ -272,10 +282,9 @@ legend { color: var(--muted); font-size: .88rem; padding: 0 4px; }
 .history li.planned { color: var(--muted); }
 .history .right { text-align: right; white-space: nowrap; }
 .project-prints li { cursor: pointer; padding-inline: 6px; }
-.project-prints li:hover { background: var(--surface-2); }
 
 .toast {
-  position: fixed; inset: auto auto 24px 50%; margin: 0; border: 0; overflow: visible;
+  position: fixed; inset: auto auto calc(24px + env(safe-area-inset-bottom, 0px)) 50%; margin: 0; border: 0; overflow: visible;
   translate: -50% 20px; opacity: 0; pointer-events: none;
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-weight: 500;
   transition: opacity .2s, translate .2s; max-width: calc(100vw - 32px); width: max-content;
@@ -321,7 +330,6 @@ legend { color: var(--muted); font-size: .88rem; padding: 0 4px; }
   background: var(--surface-2); border: 1px solid transparent; border-radius: 10px; padding: 8px 10px;
   font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
-.group-row:hover { border-color: var(--border); }
 .group-tags { justify-self: end; display: flex; gap: 6px; align-items: center; }
 
 fieldset > .btn { align-self: flex-start; }
@@ -339,7 +347,6 @@ fieldset > .btn { align-self: flex-start; }
 .thumb.big { width: 96px; height: 96px; border-radius: 10px; }
 .thumb.empty { display: block; }
 img.thumb { cursor: zoom-in; transition: transform .15s; }
-img.thumb:hover { transform: scale(1.06); }
 
 /* Zvětšený náhled: náhledy z Bambu Studia mají 512 px, víc se nezvětšuje */
 #image-dialog {
@@ -437,4 +444,131 @@ body.dropping::after {
   .fil-row select, .fil-row .fil-status { grid-column: 1 / -1; }
   .planned-item .thumb { width: 52px; height: 52px; }
   .project-prints .row-end { flex-direction: column-reverse; align-items: flex-end; gap: 4px; }
+}
+
+/* Na dotykových zařízeních vždy 16px písmo ve vstupech, jinak iOS při psaní přiblíží stránku. */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}
+
+/* Okamžitá zpětná vazba při klepnutí na karty a řádky (na dotyku nemají hover). */
+.spool, .print, .project, .planned-item, .group-row, .project-prints li {
+  transition: transform .12s ease-out, box-shadow .15s, border-color .15s, background .15s;
+}
+.spool:active, .print:active, .project:active, .planned-item:active, .group-row:active {
+  transform: scale(.985);
+}
+.project-prints li:active { background: var(--surface-2); }
+
+/* Hover jen tam, kde opravdu je myš: na dotyku by po klepnutí zůstal „přilepený“. */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover { border-color: color-mix(in srgb, var(--text) 25%, var(--border)); }
+  .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
+  .btn.ghost:hover { background: var(--surface-2); }
+  .planned-item:hover { box-shadow: var(--shadow); }
+  .btn.ok:hover { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); }
+  .planned-actions .btn.danger:hover { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+  .spool:hover { border-color: color-mix(in srgb, var(--spool) 50%, var(--border)); box-shadow: var(--shadow); }
+  .print:hover { box-shadow: var(--shadow); }
+  .project:hover { box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+  .icon-btn:hover { background: var(--surface-2); color: var(--danger); }
+  .project-prints li:hover { background: var(--surface-2); }
+  .group-row:hover { border-color: var(--border); }
+  img.thumb:hover { transform: scale(1.06); }
+}
+
+/* Návod na přidání na plochu (Nastavení) */
+.install-help { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.install-help summary { cursor: pointer; font-weight: 500; color: var(--text); }
+.install-help p { margin: 8px 0 0; }
+.install-help code { font-size: .85em; }
+
+/* Bublina s akcí (Zpět po Hotovo) – jde na ni klepnout. */
+.toast.has-action { pointer-events: auto; padding: 4px 6px 4px 16px; }
+.toast.has-action:popover-open { display: flex; align-items: center; gap: 12px; }
+.toast-action {
+  font: inherit; font-weight: 650; color: var(--accent); background: none; border: 0;
+  min-height: 40px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+}
+.toast-action:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* Fieldset má výchozí min-width: min-content, takže dlouhý obsah roztáhl dialog do strany. */
+fieldset { min-width: 0; }
+.chip .hint, .history .delta { white-space: nowrap; }
+/* Tmavá cívka na tmavém pozadí musí mít viditelný obrys. */
+.reel { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 30%, transparent); }
+#image-dialog img { width: min(512px, 92vw, 80dvh); }
+#image-dialog .image-close { width: 44px; height: 44px; }
+
+/* --- Telefon --- */
+@media (max-width: 640px) {
+  /* Statistiky a fronta jen na úvodní záložce, jinak obsah Projektů a Tisků začínal pod okrajem. */
+  body:not([data-tab="inventory"]) #stats,
+  body:not([data-tab="inventory"]) #planned { display: none !important; }
+
+  .topbar { padding-top: calc(8px + env(safe-area-inset-top, 0px)); padding-bottom: 8px; gap: 8px; }
+  .tabs button { min-height: 40px; }
+  #open-settings { width: 44px; height: 44px; justify-content: center; }
+  .stats { grid-template-columns: 1fr 1fr; gap: 8px; align-items: start; }
+  .stat { padding: 10px 12px; }
+  .stat .value { font-size: 1.3rem; }
+  .toolbar { margin: 14px 0 12px; gap: 8px; }
+  .toolbar input[type="search"] { flex-basis: 100%; }
+  .toolbar .btn { flex: 1; justify-content: center; }
+  .planned-main { align-items: flex-start; }
+
+  /* Dialogy u horního okraje (s klávesnicí zůstanou vidět), akce přilepené dole na dosah palce. */
+  dialog { margin: 12px auto auto; max-height: calc(100dvh - 24px); }
+  .dialog-actions {
+    position: sticky; bottom: -18px; z-index: 2; flex-wrap: wrap;
+    margin: 6px -18px -18px; padding: 10px 18px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface); border-top: 1px solid var(--border);
+  }
+  .dialog-actions .btn { min-height: 44px; }
+
+  /* Detail cívky, skupiny a projektu: tlačítka v mřížce, hlavní akce přes celou šířku nahoře.
+     Zavřít je zbytečné – dialog se zavře klepnutím mimo nebo gestem zpět. */
+  #detail-body .dialog-actions, #group-body .dialog-actions, #project-body .dialog-actions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  #project-body .actions-end { display: contents; }
+  #detail-body .dialog-actions .spacer, #group-body .dialog-actions .spacer,
+  #detail-body [data-act="close"], #group-body [data-close], #project-body [data-act="close"] { display: none; }
+  #detail-body .dialog-actions .btn.primary, #group-body .dialog-actions .btn.primary,
+  #project-body .dialog-actions .btn.primary { grid-column: 1 / -1; order: -1; }
+  #detail-body .dialog-actions .btn, #group-body .dialog-actions .btn,
+  #project-body .dialog-actions .btn { justify-content: center; }
+
+  /* Dotykové plochy aspoň 44 px. */
+  .icon-btn { width: 44px; height: 44px; }
+  .btn.small { min-height: 44px; }
+  label.check { min-height: 44px; }
+  label.check input { width: 20px; height: 20px; }
+  .segmented label { padding: 12px 4px; }
+  .link-btn { padding: 12px 0; }
+
+  /* Formulář tisku: výběr cívky přes celou šířku, pod ním gramy a ×. */
+  .usage-row { grid-template-columns: 1fr 44px; }
+  .usage-row select { grid-column: 1 / -1; }
+  .usage-row + .usage-row { border-top: 1px solid var(--border); padding-top: 10px; }
+
+  .fail-row { grid-template-columns: minmax(0, 1fr) auto 88px; }
+  .fail-row .chip { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+  .print .chips { grid-column: 1 / -1; }
+  .group-row { grid-template-columns: 36px 1fr; }
+  .group-tags { grid-column: 2; justify-self: start; }
+  .project-prints li { flex-wrap: wrap; }
+  .project-prints .row-main { flex: 1 1 100%; }
+  .project-prints .row-end { flex-direction: row; align-items: center; margin-left: 54px; gap: 10px; }
+  .history, .group-list { max-height: none; overflow: visible; }
+  .plate-fil .fil-vendor { display: none; }
+
+  /* Čitelnost drobných, ale důležitých údajů. */
+  .tag { font-size: .78rem; }
+  .usage-row .after, .spool .reserved, .history .when { font-size: .85rem; }
+
+  /* Bublina nahoře – dole by zakrývala přilepená tlačítka dialogů. */
+  .toast { inset: calc(12px + env(safe-area-inset-top, 0px)) auto auto 50%; translate: -50% -20px; }
+  .toast.show { translate: -50% 0; }
 }
