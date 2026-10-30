@@ -1,3 +1,5 @@
+import { customName, FAMILIES, familyOf, filamentMaterial, materialMatch } from './materials.js';
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -387,9 +389,15 @@ failDialog.addEventListener('close', async () => {
 function fillFilters() {
   const sel = $('#spool-material');
   const current = sel.value;
+  const option = (value, label = value) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(label)}</option>`;
   const materials = [...new Set(state.spools.map(s => s.material))].sort();
-  sel.innerHTML = '<option value="">Všechny materiály</option>' +
-    materials.map(m => `<option${m === current ? ' selected' : ''}>${esc(m)}</option>`).join('');
+  const byFamily = Map.groupBy(materials, familyOf);
+  // Druh s víc variantami dostane skupinu s položkou pro všechny varianty najednou.
+  sel.innerHTML = option('', 'Všechny materiály') + FAMILIES.filter(f => byFamily.has(f.name)).map(({ name }) => {
+    const list = byFamily.get(name);
+    if (list.length === 1) return option(list[0]);
+    return `<optgroup label="${esc(name)}">${option(`family:${name}`, `Všechny ${name}`)}${list.map(m => option(m)).join('')}</optgroup>`;
+  }).join('');
   const brands = [...new Set(state.allSpools.map(s => s.brand).filter(Boolean))].sort();
   $('#brand-list').innerHTML = brands.map(b => `<option>${esc(b)}</option>`).join('');
 }
@@ -447,7 +455,7 @@ function renderSpools() {
   const q = $('#spool-search').value.trim().toLowerCase();
   const mat = $('#spool-material').value;
   const list = state.spools.filter(s =>
-    (!mat || s.material === mat) &&
+    (!mat || (mat.startsWith('family:') ? familyOf(s.material) === mat.slice(7) : s.material === mat)) &&
     (!q || [s.brand, s.material, s.color_name, s.location, s.notes].join(' ').toLowerCase().includes(q)));
 
   const grid = $('#spool-grid');
@@ -551,6 +559,76 @@ const spoolForm = $('#spool-form');
 let editingSpool = null;
 let spoolSaved = null; // callback z importu: dostane uloženou cívku
 
+// Výběr materiálu: druh → varianta (nebo vlastní). Hodnota je ve skrytém poli `material`.
+const materialInput = spoolForm.elements.material;
+const materialFamilies = $('#material-families');
+const materialVariants = $('#material-variants');
+const materialCustomLabel = $('#material-custom-label');
+const materialCustom = $('#material-custom');
+const materialCustomHint = $('#material-custom-hint');
+const material = { family: 'PLA', custom: false, expanded: false };
+
+const pill = (attrs, label, pressed) => `<button type="button" class="pill" ${attrs} aria-pressed="${pressed}">${esc(label)}</button>`;
+
+function renderMaterial() {
+  const { family, custom, expanded } = material;
+  const value = materialInput.value;
+  const shown = FAMILIES.filter(f => f.common || expanded || f.name === family);
+  materialFamilies.innerHTML = shown.map(f => pill(`data-family="${esc(f.name)}"`, f.name, f.name === family)).join('')
+    + (shown.length < FAMILIES.length ? '<button type="button" class="pill ghost" data-more>Další…</button>' : '');
+  // Nabídka = katalog + vlastní varianty z existujících cívek (a aktuální hodnota u úpravy cívky).
+  const catalog = FAMILIES.find(f => f.name === family).variants;
+  const own = [...state.allSpools.map(s => s.material), custom ? '' : value]
+    .filter(m => m && familyOf(m) === family && !catalog.includes(m));
+  const variants = [...new Set([...catalog, ...own.sort()])];
+  // Druh je vybraný o řádek výš, proto v nabídce stačí „Matte“ místo „PLA-Matte“ a formulář je kratší.
+  const short = v => v.startsWith(`${family}-`) ? v.slice(family.length + 1) : v;
+  materialVariants.innerHTML = variants.map(v => pill(`data-variant="${esc(v)}"`, short(v), !custom && v === value)).join('')
+    + `<button type="button" class="pill ghost" data-custom aria-pressed="${custom}">+ Vlastní</button>`;
+  materialCustomLabel.hidden = !custom;
+  materialCustom.required = custom;
+  syncMaterialCustom();
+}
+
+function syncMaterialCustom() {
+  if (!material.custom) return;
+  const name = customName(material.family, materialCustom.value);
+  materialInput.value = name;
+  materialCustomHint.textContent = name && name !== materialCustom.value.trim() ? `Uloží se jako ${name}` : '';
+}
+
+function setMaterial(value) {
+  materialInput.value = value;
+  material.family = familyOf(value);
+  material.custom = false;
+  material.expanded = false;
+  materialCustom.value = '';
+  renderMaterial();
+}
+
+materialFamilies.addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  if (btn.hasAttribute('data-more')) material.expanded = true;
+  else {
+    material.family = btn.dataset.family;
+    const [first] = FAMILIES.find(f => f.name === material.family).variants;
+    material.custom = !first;
+    materialInput.value = first ?? '';
+    materialCustom.value = '';
+  }
+  renderMaterial();
+});
+materialVariants.addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  material.custom = btn.hasAttribute('data-custom');
+  if (!material.custom) { materialInput.value = btn.dataset.variant; materialCustom.value = ''; }
+  renderMaterial();
+  if (material.custom) materialCustom.focus();
+});
+materialCustom.addEventListener('input', syncMaterialCustom);
+
 function openSpoolForm(spool = null, { prefill = null, onSaved = null } = {}) {
   editingSpool = spool;
   spoolSaved = onSaved;
@@ -566,6 +644,7 @@ function openSpoolForm(spool = null, { prefill = null, onSaved = null } = {}) {
     spoolForm.elements.spool_weight.value = state.settings.default_spool_weight ?? '';
     for (const [key, value] of Object.entries(prefill ?? {})) spoolForm.elements[key].value = value;
   }
+  setMaterial(spool?.material ?? (prefill?.material || 'PLA'));
   spoolDialog.showModal();
 }
 
@@ -1237,17 +1316,6 @@ deletePrintDialog.addEventListener('close', async () => {
 
 // --- Import 3MF ---
 
-// Párování filamentu z Bambu Studia s cívkou. Materiál: „PLA Basic/Matte…“ = PLA (shoda podle
-// prvního slova), „PLA+“ / „PLA Pro“ ≈ PLA jen jako slabší shoda; „PLA-CF“ je jiný materiál.
-function materialKey(m) {
-  const [first = '', second = ''] = String(m ?? '').trim().toUpperCase().split(/\s+/);
-  return { base: first.replace(/\+$/, ''), plus: first.endsWith('+') || second === 'PRO' || second === '+' };
-}
-function materialMatch(a, b) {
-  const x = materialKey(a), y = materialKey(b);
-  if (!x.base || x.base !== y.base) return 0;
-  return x.plus === y.plus ? 2 : 1;
-}
 const hexRgb = hex => {
   const m = /^#?([0-9a-f]{6})/i.exec(String(hex ?? ''));
   return m ? [0, 8, 16].map(sh => (parseInt(m[1], 16) >> (16 - sh)) & 255) : null;
@@ -1261,7 +1329,7 @@ const COLOR_MATCH = 60; // RGB vzdálenost, do které barvu cívky bereme jako s
 // Skupiny stejných cívek, které sedí na filament; nejlepší první (materiál, pak bližší barva).
 function matchGroups(fil) {
   const scored = state.allSpools
-    .map(s => ({ s, mat: materialMatch(s.material, fil.type), dist: colorDistance(s.color_hex, fil.color) }))
+    .map(s => ({ s, mat: materialMatch(s.material, filamentMaterial(fil)), dist: colorDistance(s.color_hex, fil.color) }))
     .filter(x => x.mat > 0 && x.dist <= COLOR_MATCH);
   return [...Map.groupBy(scored, x => groupKey(x.s)).values()]
     .map(list => ({ spools: sortGroup(list.map(x => x.s)), mat: Math.max(...list.map(x => x.mat)), dist: Math.min(...list.map(x => x.dist)) }))
@@ -1377,7 +1445,7 @@ function showImport(file, { projectId = null, reprint = null } = {}) {
     const fromPrint = new Map();
     for (const u of reprint.usages) {
       const fil = plate.filaments.length === 1 ? plate.filaments[0] : [...plate.filaments].sort((a, b) =>
-        (materialMatch(u.material, b.type) > 0) - (materialMatch(u.material, a.type) > 0)
+        (materialMatch(u.material, filamentMaterial(b)) > 0) - (materialMatch(u.material, filamentMaterial(a)) > 0)
         || colorDistance(u.color_hex, a.color) - colorDistance(u.color_hex, b.color))[0];
       if (!fil) continue;
       imp.preferred.set(fil.id, [...(imp.preferred.get(fil.id) ?? []), u.spool_id]);
@@ -1469,7 +1537,7 @@ function planImport() {
   for (const f of list) {
     if (imp.assign.has(f.id)) {
       f.spool = state.allSpools.find(s => s.id === imp.assign.get(f.id)) ?? null;
-      f.weak = f.spool ? materialMatch(f.spool.material, f.type) === 1 : false;
+      f.weak = f.spool ? materialMatch(f.spool.material, filamentMaterial(f)) === 1 : false;
     } else {
       const sug = suggestSpool(f, f.need, avail, imp.preferred.get(f.id));
       f.spool = sug?.spool ?? null;
@@ -1616,7 +1684,7 @@ importForm.addEventListener('click', e => {
   openSpoolForm(null, {
     prefill: {
       brand: fil.vendor && fil.vendor !== 'Generic' ? fil.vendor : '',
-      material: fil.type ?? '',
+      material: filamentMaterial(fil),
       color_hex: /^#[0-9a-f]{6}$/i.test(fil.color ?? '') ? fil.color.toLowerCase() : '#e8743b',
     },
     onSaved: spool => {

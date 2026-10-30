@@ -81,6 +81,15 @@ zůstatku převážením cívky.
 - „+ Přidat stejnou“ (detail cívky i skupiny) = `POST /api/spools/:id/duplicate` s počtem kusů
   a volitelně jinou cenou; nové cívky jsou plné.
 
+**Materiály** (`public/materials.js`)
+- Formulář cívky: druh → varianta → „+ Vlastní“. Ukládá se jen `material` = konkrétní varianta
+  („PLA-Matte“), bez migrace; druh se odvozuje z názvu (`familyOf`). Vlastní varianta dostane předponu
+  druhu („TPU-Shore 70“) a v nabídce se objeví podle existujících cívek.
+- Filtr inventáře umí celý druh (`family:PLA`) i jednu variantu.
+- Párování 3MF: Bambu píše do `filament_type` jen „PLA“, variantu bere `filamentMaterial` z profilu
+  (`filament_settings_id`). `materialMatch`: 3 stejná, 2 jedna strana bez varianty, 1 jiná varianta
+  (upozornění), 0 jiný materiál; výztuž a podpory (CF, GF, -S, Aero) nejsou náhrada za základní materiál.
+
 ## Fáze
 1. ✅ Docker + GitHub Actions + nasazení na NAS, verzované migrace, Nastavení
 2. ✅ Projekty, fronta naplánovaných tisků, cena (filament + elektřina), rezervace

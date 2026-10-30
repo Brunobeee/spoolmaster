@@ -44,7 +44,7 @@ html {
 button, .btn, a, label, select, [role="tab"], summary {
   touch-action: manipulation;
 }
-button, .btn, [role="tab"], .segmented label, label.check, .chip, .tag {
+button, .btn, .pill, [role="tab"], .segmented label, label.check, .chip, .tag {
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 /* Pod otevřeným dialogem se stránka neposouvá a rolování dialogu na ni nepřetéká.
@@ -107,7 +107,7 @@ input, select, textarea {
   font: inherit; color: var(--text); background: var(--surface);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 100%;
 }
-input:focus, select:focus, textarea:focus, .btn:focus-visible, .tabs button:focus-visible {
+input:focus, select:focus, textarea:focus, .btn:focus-visible, .pill:focus-visible, .tabs button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 1px;
 }
 input[type="color"] { padding: 2px; height: 40px; cursor: pointer; }
@@ -258,6 +258,19 @@ form { display: flex; flex-direction: column; gap: 14px; }
 .spacer { flex: 1; }
 .actions-end { display: flex; gap: 8px; margin-left: auto; }
 .hint { color: var(--muted); font-size: .85rem; margin: 0; }
+.material-picker { display: flex; flex-direction: column; gap: 6px; }
+.material-picker .pills + .field-label { margin-top: 6px; }
+.material-picker label { margin-top: 6px; }
+.field-label { color: var(--muted); font-size: .88rem; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill {
+  font: inherit; font-size: .88rem; color: var(--text); background: var(--surface-2);
+  border: 1px solid transparent; border-radius: 99px; padding: 5px 12px; cursor: pointer;
+  transition: background .12s ease-out, color .12s ease-out, scale .1s ease-out;
+}
+.pill:active { scale: .96; }
+.pill.ghost { background: none; border: 1px dashed var(--border); color: var(--muted); }
+.pill[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 legend { color: var(--muted); font-size: .88rem; padding: 0 4px; }
 .usage-row { display: grid; grid-template-columns: 1fr 110px 32px; gap: 8px; align-items: center; }
@@ -459,6 +472,7 @@ body.dropping::after {
 
 /* Na dotykových zařízeních vždy 16px písmo ve vstupech, jinak iOS při psaní přiblíží stránku. */
 @media (pointer: coarse) {
+  .pill { padding: 9px 14px; }
   input, select, textarea { font-size: 16px; }
 }
 

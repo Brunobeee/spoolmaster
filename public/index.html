@@ -74,8 +74,18 @@
     <form method="dialog" id="spool-form">
       <h2 data-title>Nová cívka</h2>
       <div class="grid-2">
-        <label>Značka <input name="brand" placeholder="Prusament" list="brand-list"></label>
-        <label>Materiál <input name="material" required placeholder="PLA" list="material-list"></label>
+        <label class="span-2">Značka <input name="brand" placeholder="Prusament" list="brand-list"></label>
+        <div class="span-2 material-picker">
+          <input type="hidden" name="material" value="PLA">
+          <span class="field-label" id="material-family-label">Druh materiálu</span>
+          <div class="pills" id="material-families" role="group" aria-labelledby="material-family-label"></div>
+          <span class="field-label" id="material-variant-label">Varianta</span>
+          <div class="pills" id="material-variants" role="group" aria-labelledby="material-variant-label"></div>
+          <label id="material-custom-label" hidden>Vlastní varianta
+            <input id="material-custom" maxlength="40" placeholder="např. Shore 70" autocomplete="off">
+            <span class="hint" id="material-custom-hint"></span>
+          </label>
+        </div>
         <label>Název barvy <input name="color_name" placeholder="Galaxy Black"></label>
         <label>Barva <input name="color_hex" type="color" value="#e8743b"></label>
         <label>Hmotnost filamentu (g) <input name="initial_weight" type="text" inputmode="decimal" pattern="\d*[.,]?\d*" value="1000" required></label>
@@ -326,10 +336,6 @@
   </dialog>
 
   <datalist id="brand-list"></datalist>
-  <datalist id="material-list">
-    <option>PLA</option><option>PLA+</option><option>PETG</option><option>ABS</option><option>ASA</option>
-    <option>TPU</option><option>PA</option><option>PC</option><option>PLA-CF</option><option>PETG-CF</option>
-  </datalist>
 
   <!-- Zvětšený náhled modelu -->
   <dialog id="image-dialog" aria-label="Náhled modelu">
